@@ -108,8 +108,6 @@ Develop a Python-based MCP (Model Context Protocol) server that acts as an inter
 - 2.10: "In `server.py`, create FastAPI endpoints (e.g., `/find_events`, `/create_event`) that call the corresponding functions in `calendar_actions.py`, handling request parsing and response formatting according to MCP specifications (details TBD)."
   * Files: [`server.py`](mdc:src/server.py), [`calendar_actions.py`](mdc:src/calendar_actions.py)
 
-## Backlog 📝
-
 ### 3. Advanced Features Implementation 📌
 **Priority:** 🟠 Medium 
 **Status:** ● done  
@@ -198,10 +196,40 @@ Develop a Python-based MCP (Model Context Protocol) server that acts as an inter
 - 4.10: "Update the README.md file to document the MCP integration, including how to configure Claude Desktop or other MCP clients to use the calendar server."
   * File: [`README.md`](mdc:README.md)
 
-### 5. MCP Client Integration Enhancements 📌
+### 5. Debugging Core & Advanced Actions 📌
+**Priority:** 🔴 High
+**Status:** ⊙ in-progress
+**Dependencies:** 2, 3, 4
+**Complexity:** 5/10
+**Files:**
+- **Main**:
+  * [`src/calendar_actions.py`](mdc:src/calendar_actions.py)
+  * [`src/server.py`](mdc:src/server.py)
+- **Related**:
+  * [`src/models.py`](mdc:src/models.py)
+  * [`calendar_mcp.log`](mdc:calendar_mcp.log)
+
+#### Subtasks:
+| ID | Title | Dependencies | Status | Complexity | Files |
+|----|----|-----|-----|---|----|
+| 5.1 | Debug `find_events` time parameter handling | 2.2, 2.10 | ○ pending | 4/10 | [`calendar_actions.py`](mdc:src/calendar_actions.py), [`server.py`](mdc:src/server.py) |
+| 5.2 | Enhance Logging Across Modules | None | ● done | 4/10 | [`run_server.py`](mdc:run_server.py), [`server.py`](mdc:src/server.py), [`calendar_actions.py`](mdc:src/calendar_actions.py) |
+| 5.3 | Fix `create_event` serialization errors | 2.3 | ● done | 5/10 | [`calendar_actions.py`](mdc:src/calendar_actions.py), [`models.py`](mdc:src/models.py) |
+
+**Example Subtask Prompts:**
+- 5.1: "Investigate and fix errors occurring when calling the `find_events` tool with explicit ISO 8601 date-time strings (e.g., including 'Z' for UTC). Check FastAPI parsing and `calendar_actions.py` formatting."
+  * Files: [`calendar_actions.py`](mdc:src/calendar_actions.py), [`server.py`](mdc:src/server.py)
+
+- 5.2: "Improve logging detail and consistency across `run_server.py`, `server.py`, and `calendar_actions.py` to facilitate debugging. Ensure file handler isn't removed in MCP mode and add logging reset on startup."
+  * Files: [`run_server.py`](mdc:run_server.py), [`server.py`](mdc:src/server.py), [`calendar_actions.py`](mdc:src/calendar_actions.py)
+
+- 5.3: "Fix `TypeError: Object of type datetime is not JSON serializable` and subsequent `AttributeError` in `create_event` by ensuring correct `datetime` string formatting and updating the `EventCreateRequest` model."
+  * Files: [`calendar_actions.py`](mdc:src/calendar_actions.py), [`models.py`](mdc:src/models.py)
+
+### 6. MCP Client Integration Enhancements 📌
 **Priority:** 🟠 Medium  
 **Status:** ○ pending  
-**Dependencies:** 4  
+**Dependencies:** 4, 5 
 **Complexity:** 7/10  
 **Files:**
 - **Main**: 
@@ -213,30 +241,30 @@ Develop a Python-based MCP (Model Context Protocol) server that acts as an inter
 #### Subtasks:
 | ID | Title | Dependencies | Status | Complexity | Files |
 |----|----|-----|-----|---|----|
-| 5.1 | Add MCP Resources Support | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
-| 5.2 | Add MCP Prompts Support | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
-| 5.3 | Enhance Tool Argument Validation | None | ○ pending | 3/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
-| 5.4 | Add Response Result Formatting | None | ○ pending | 3/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
-| 5.5 | Implement Error Handling and Recovery | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
-| 5.6 | Create Client Installation Guide | 5.1-5.5 | ○ pending | 3/10 | [`README.md`](mdc:README.md) |
+| 6.1 | Add MCP Resources Support | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
+| 6.2 | Add MCP Prompts Support | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
+| 6.3 | Enhance Tool Argument Validation | None | ○ pending | 3/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
+| 6.4 | Add Response Result Formatting | None | ○ pending | 3/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
+| 6.5 | Implement Error Handling and Recovery | None | ○ pending | 4/10 | [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py) |
+| 6.6 | Create Client Installation Guide | 6.1-6.5 | ○ pending | 3/10 | [`README.md`](mdc:README.md) |
 
 **Example Subtask Prompts:**
-- 5.1: "Add support for MCP Resources to provide static data like example events, formatting templates, or help documentation to the client."
+- 6.1: "Add support for MCP Resources to provide static data like example events, formatting templates, or help documentation to the client."
   * File: [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py)
 
-- 5.2: "Add support for MCP Prompts to provide pre-defined templates that help users accomplish specific tasks with the calendar tools."
+- 6.2: "Add support for MCP Prompts to provide pre-defined templates that help users accomplish specific tasks with the calendar tools."
   * File: [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py)
 
-- 5.3: "Enhance input validation for tool arguments to provide better error messages and prevent invalid API calls."
+- 6.3: "Enhance input validation for tool arguments to provide better error messages and prevent invalid API calls."
   * File: [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py)
 
-- 5.4: "Improve formatting of tool results to make them more readable for humans, especially for complex responses like event lists."
+- 6.4: "Improve formatting of tool results to make them more readable for humans, especially for complex responses like event lists."
   * File: [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py)
 
-- 5.5: "Implement comprehensive error handling and recovery mechanisms for the MCP tools to handle connection issues, API errors, and other edge cases gracefully."
+- 6.5: "Implement comprehensive error handling and recovery mechanisms for the MCP tools to handle connection issues, API errors, and other edge cases gracefully."
   * File: [`src/mcp_bridge.py`](mdc:src/mcp_bridge.py)
 
-- 5.6: "Create a detailed guide for installing and configuring various MCP clients to use the calendar server, with specific instructions for Claude Desktop and other popular clients."
+- 6.6: "Create a detailed guide for installing and configuring various MCP clients to use the calendar server, with specific instructions for Claude Desktop and other popular clients."
   * File: [`README.md`](mdc:README.md)
 
 ## Completed Tasks ✅

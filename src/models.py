@@ -110,6 +110,8 @@ class EventCreateRequest(BaseModel):
     description: Optional[str] = None
     location: Optional[str] = None
     attendees: Optional[List[EmailStr]] = Field(None, description="List of attendee email addresses to invite.")
+    recurrence: Optional[List[str]] = Field(None, description="List of RRULEs, EXRULEs, RDATEs or EXDATEs for recurring events.")
+    reminders: Optional[EventReminders] = Field(None, description="Notification settings for the event.")
     # Add other creatable fields as needed
 
 class QuickAddEventRequest(BaseModel):

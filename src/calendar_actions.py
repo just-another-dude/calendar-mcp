@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, date, timedelta, time
 from typing import Optional, List, Dict, Any, Tuple
 from dateutil import parser # For robust datetime parsing
+import json
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -126,6 +127,12 @@ def find_events(
 
     except HttpError as error:
         logger.error(f"An API error occurred while finding events: {error}", exc_info=True)
+        # Add more detailed logging if possible
+        try:
+            error_content = error.content.decode('utf-8')
+            logger.error(f"Google API error details (find_events): {error.resp.status} - {error_content}")
+        except Exception:
+            logger.error(f"Google API error details (find_events): {error.resp.status} - Could not decode error content.")
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while finding events: {e}", exc_info=True)
@@ -152,17 +159,72 @@ def create_event(
     if not service:
         return None
 
-    # Construct the event body dictionary from the Pydantic model
-    # Use .dict(by_alias=True, exclude_unset=True) for proper formatting
-    event_body = event_data.dict(by_alias=True, exclude_unset=True)
+    # --- Manually Construct Event Body --- 
+    # Ensure datetime objects are formatted as strings for JSON serialization
+    event_body: Dict[str, Any] = {}
 
-    # Handle attendees specifically: API expects a list of {'email': email_address}
-    if 'attendees' in event_body and event_body['attendees'] is not None:
-        # Assuming event_data.attendees was a list of emails from EventCreateRequest
+    def format_datetime_field(dt_obj: datetime) -> str:
+        if dt_obj.tzinfo is None:
+            # Assume UTC if timezone is naive
+            return dt_obj.isoformat() + 'Z'
+        else:
+            return dt_obj.isoformat()
+
+    # Required fields
+    if not event_data.start or not event_data.end:
+        logger.error("Event creation failed: Start and End times are required.")
+        return None # Or raise an error
+    
+    event_body['start'] = {}
+    if event_data.start.dateTime:
+        event_body['start']['dateTime'] = format_datetime_field(event_data.start.dateTime)
+        if event_data.start.timeZone:
+            event_body['start']['timeZone'] = event_data.start.timeZone
+    elif event_data.start.date:
+        event_body['start']['date'] = str(event_data.start.date) # Ensure date is string
+    else:
+        logger.error("Event creation failed: Start time requires either dateTime or date.")
+        return None
+
+    event_body['end'] = {}
+    if event_data.end.dateTime:
+        event_body['end']['dateTime'] = format_datetime_field(event_data.end.dateTime)
+        if event_data.end.timeZone:
+            event_body['end']['timeZone'] = event_data.end.timeZone
+    elif event_data.end.date:
+        event_body['end']['date'] = str(event_data.end.date) # Ensure date is string
+    else:
+        logger.error("Event creation failed: End time requires either dateTime or date.")
+        return None
+        
+    # Optional fields
+    if event_data.summary:
+        event_body['summary'] = event_data.summary
+    if event_data.description:
+        event_body['description'] = event_data.description
+    if event_data.location:
+        event_body['location'] = event_data.location
+    if event_data.attendees:
         event_body['attendees'] = [{'email': email} for email in event_data.attendees]
+    if event_data.recurrence:
+        event_body['recurrence'] = event_data.recurrence
+    if event_data.reminders:
+        # Pydantic should handle nested model serialization correctly here if reminders is a model
+        # If it needs specific formatting, adjust here. Assuming .dict() is okay for reminders.
+        event_body['reminders'] = event_data.reminders.dict(by_alias=True, exclude_unset=True)
+    # Add other optional fields from EventCreateRequest if needed (e.g., colorId, transparency, etc.)
 
-    logger.info(f"Creating event in calendar '{calendar_id}': {event_data.summary}")
-    logger.debug(f"Event body for creation: {event_body}")
+    # --- End Manual Construction ---
+
+    logger.info(f"Creating event in calendar '{calendar_id}': {event_body.get('summary', '[No Summary]')}")
+    # Use json.dumps for accurate debug logging of what will be serialized
+    try:
+        event_body_json = json.dumps(event_body, indent=2) # Pretty print for readability
+        logger.debug(f"Event body for creation (JSON):\n{event_body_json}")
+    except TypeError as json_err:
+        # This should not happen now, but good to have a fallback log
+        logger.error(f"Could not serialize event_body for debug log: {json_err}")
+        logger.debug(f"Event body for creation (raw dict): {event_body}")
 
     try:
         created_event = service.events().insert(
@@ -178,7 +240,13 @@ def create_event(
         return parsed_event
 
     except HttpError as error:
-        logger.error(f"An API error occurred while creating event: {error}", exc_info=True)
+        # Log the actual error response content for debugging
+        error_content = "Unknown error content"
+        try:
+            error_content = error.content.decode('utf-8')
+        except Exception:
+            pass # Keep default message if decoding fails
+        logger.error(f"Google API error while creating event: {error.resp.status} - {error_content}", exc_info=True) 
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while creating event: {e}", exc_info=True)
@@ -222,8 +290,12 @@ def quick_add_event(
 
     except HttpError as error:
         logger.error(f"An API error occurred during quick add: {error}", exc_info=True)
-        # Specific error handling for invalid text?
-        # Google might return 400 Bad Request if text is unparseable
+        # Add more detailed logging
+        try:
+            error_content = error.content.decode('utf-8')
+            logger.error(f"Google API error details (quick_add): {error.resp.status} - {error_content}")
+        except Exception:
+            logger.error(f"Google API error details (quick_add): {error.resp.status} - Could not decode error content.")
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred during quick add: {e}", exc_info=True)
@@ -300,7 +372,13 @@ def update_event(
         if error.resp.status == 404:
             logger.error(f"Event '{event_id}' not found in calendar '{calendar_id}'.")
         else:
-            logger.error(f"An API error occurred while updating event '{event_id}': {error}", exc_info=True)
+            # Log detailed error content
+            error_content = "Unknown error content"
+            try:
+                error_content = error.content.decode('utf-8')
+            except Exception:
+                pass
+            logger.error(f"Google API error while updating event '{event_id}': {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while updating event '{event_id}': {e}", exc_info=True)
@@ -344,7 +422,13 @@ def delete_event(
         if error.resp.status in [404, 410]:
             logger.error(f"Event '{event_id}' not found or already deleted in calendar '{calendar_id}'. Cannot delete.")
         else:
-            logger.error(f"An API error occurred while deleting event '{event_id}': {error}", exc_info=True)
+            # Log detailed error content
+            error_content = "Unknown error content"
+            try:
+                error_content = error.content.decode('utf-8')
+            except Exception:
+                pass
+            logger.error(f"Google API error while deleting event '{event_id}': {error.resp.status} - {error_content}", exc_info=True)
         return False
     except Exception as e:
         logger.error(f"An unexpected error occurred while deleting event '{event_id}': {e}", exc_info=True)
@@ -385,7 +469,13 @@ def add_attendee(
         if error.resp.status == 404:
             logger.error(f"Event '{event_id}' not found in calendar '{calendar_id}'. Cannot add attendees.")
         else:
-            logger.error(f"API error retrieving event '{event_id}': {error}", exc_info=True)
+            # Log detailed error content when retrieving event
+            error_content = "Unknown error content"
+            try:
+                error_content = error.content.decode('utf-8')
+            except Exception:
+                pass
+            logger.error(f"Google API error retrieving event '{event_id}' for adding attendees: {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"Unexpected error retrieving event '{event_id}': {e}", exc_info=True)
@@ -435,7 +525,13 @@ def add_attendee(
         return parsed_event
 
     except HttpError as error:
-        logger.error(f"An API error occurred while patching event '{event_id}' with new attendees: {error}", exc_info=True)
+        # Log detailed error content when patching event
+        error_content = "Unknown error content"
+        try:
+            error_content = error.content.decode('utf-8')
+        except Exception:
+            pass
+        logger.error(f"Google API error occurred while patching event '{event_id}' with new attendees: {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while patching event '{event_id}' with new attendees: {e}", exc_info=True)
@@ -475,6 +571,12 @@ def find_calendars(
 
     except HttpError as error:
         logger.error(f"An API error occurred while fetching calendar list: {error}", exc_info=True)
+        # Add more detailed logging if possible
+        try:
+            error_content = error.content.decode('utf-8')
+            logger.error(f"Google API error details (find_calendars): {error.resp.status} - {error_content}")
+        except Exception:
+            logger.error(f"Google API error details (find_calendars): {error.resp.status} - Could not decode error content.")
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while fetching calendar list: {e}", exc_info=True)
@@ -515,6 +617,13 @@ def create_calendar(
 
     except HttpError as error:
         logger.error(f"An API error occurred while creating calendar '{summary}': {error}", exc_info=True)
+        # Log detailed error content
+        error_content = "Unknown error content"
+        try:
+            error_content = error.content.decode('utf-8')
+        except Exception:
+            pass
+        logger.error(f"Google API error occurred while creating calendar '{summary}': {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while creating calendar '{summary}': {e}", exc_info=True)
@@ -554,7 +663,13 @@ def check_attendee_status(
         if error.resp.status == 404:
             logger.error(f"Event '{event_id}' not found in calendar '{calendar_id}'. Cannot check status.")
         else:
-            logger.error(f"API error retrieving event '{event_id}': {error}", exc_info=True)
+            # Log detailed error content
+            error_content = "Unknown error content"
+            try:
+                error_content = error.content.decode('utf-8')
+            except Exception:
+                pass
+            logger.error(f"Google API error retrieving event '{event_id}' for status check: {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"Unexpected error retrieving event '{event_id}': {e}", exc_info=True)
@@ -659,6 +774,13 @@ def find_availability(
 
     except HttpError as error:
         logger.error(f"An API error occurred during free/busy query: {error}", exc_info=True)
+        # Log detailed error content
+        error_content = "Unknown error content"
+        try:
+            error_content = error.content.decode('utf-8')
+        except Exception:
+            pass
+        logger.error(f"Google API error occurred during free/busy query: {error.resp.status} - {error_content}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred during free/busy query: {e}", exc_info=True)

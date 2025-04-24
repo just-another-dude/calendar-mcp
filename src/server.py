@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from datetime import datetime, date, time
 from typing import Optional, List, Dict, Any
 import json
+from dateutil import parser # Import dateutil parser
 
 # Configure logging first to capture any startup errors
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -22,6 +23,7 @@ from fastapi.routing import APIRoute
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
 # Import functions and models directly using absolute imports
 try:
@@ -68,30 +70,71 @@ global_credentials: Optional[Credentials] = None
 def startup_event():
     """Attempt to get credentials on server startup."""
     global global_credentials
-    # Restore authentication logic
     logger.info("Server starting up. Attempting to authenticate with Google...")
     try:
         global_credentials = get_credentials()
         if not global_credentials or not global_credentials.valid:
-            logger.error("Failed to obtain valid Google credentials on startup. Server might not function correctly.")
+            # Log error but allow server to start; endpoints requiring auth will fail until fixed.
+            logger.error("Failed to obtain valid Google credentials on startup. Endpoints requiring auth will be unavailable.")
         else:
             logger.info("Successfully obtained Google credentials.")
     except Exception as e:
-        logger.error(f"An error occurred during startup authentication: {e}", exc_info=True)
-        # Server will start, but endpoints requiring auth will fail
+        logger.error(f"An error occurred during startup authentication: {e}. Endpoints requiring auth will be unavailable.", exc_info=True)
+        # Set credentials to None to indicate failure
+        global_credentials = None
 
 # --- Dependency for Credentials ---
 def get_current_credentials() -> Credentials:
-    """Dependency to provide valid credentials to endpoints."""
-    if not global_credentials or not global_credentials.valid:
-        logger.error("Authentication required but credentials are not valid or available.")
-        # Maybe attempt re-authentication here? For now, raise error.
-        # global_credentials = get_credentials() # Re-attempt - could block?
-        # if not global_credentials or not global_credentials.valid:
-        raise HTTPException(
-            status_code=503, # Service Unavailable
-            detail="Google API credentials are not available or invalid. Please restart server or ensure authentication succeeded."
-        )
+    """Dependency to provide valid credentials to endpoints. Attempts refresh if invalid."""
+    global global_credentials
+
+    if not global_credentials:
+        logger.warning("Credentials not available (failed during startup?). Attempting to re-fetch.")
+        try:
+            global_credentials = get_credentials()
+            if not global_credentials:
+                 raise HTTPException(
+                    status_code=503, 
+                    detail="Google API credentials are not available. Initial fetch failed."
+                )
+        except Exception as e:
+            logger.error(f"Failed to re-fetch credentials: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Google API credentials unavailable. Failed to re-fetch: {e}"
+            )
+    
+    # Check if valid, try refreshing if expired or invalid
+    if not global_credentials.valid:
+        logger.warning("Credentials are invalid or expired. Attempting refresh...")
+        try:
+            global_credentials.refresh(Request()) # Requires: from google.auth.transport.requests import Request
+            if not global_credentials.valid:
+                logger.error("Credential refresh succeeded but credentials still invalid.")
+                raise HTTPException(
+                    status_code=503, 
+                    detail="Google API credentials invalid after refresh attempt."
+                )
+            logger.info("Credentials refreshed successfully within dependency.")
+        except Exception as e:
+            logger.error(f"Failed to refresh credentials within dependency: {e}", exc_info=True)
+            # If refresh fails, try a full re-fetch as a last resort
+            logger.warning("Refresh failed. Attempting a full re-fetch of credentials...")
+            try:
+                global_credentials = get_credentials()
+                if not global_credentials or not global_credentials.valid:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Google API credentials unavailable after failed refresh and re-fetch."
+                    )
+                logger.info("Credentials re-fetched successfully after failed refresh.")
+            except Exception as inner_e:
+                logger.error(f"Failed to re-fetch credentials after failed refresh: {inner_e}", exc_info=True)
+                raise HTTPException(
+                    status_code=503, 
+                    detail=f"Google API credentials unavailable. Refresh and re-fetch failed: {inner_e}"
+                )
+
     return global_credentials
 
 # --- MCP Offerings Endpoint --- 
@@ -234,9 +277,12 @@ def list_calendars_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Lists the calendars on the user's calendar list."""
+    logger.info(f"Endpoint 'list_calendars' called. Params: min_access_role='{min_access_role}'")
     result = calendar_actions.find_calendars(credentials=creds, min_access_role=min_access_role)
     if result is None:
+        logger.error("Action 'find_calendars' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to retrieve calendar list from Google API.")
+    logger.info(f"Endpoint 'list_calendars' completed successfully. Returning {len(result.items)} calendars.")
     return result
 
 class CreateCalendarRequest(BaseModel):
@@ -255,9 +301,12 @@ def create_calendar_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Creates a new secondary calendar."""
+    logger.info(f"Endpoint 'create_calendar' called. Summary: '{request.summary}'")
     result = calendar_actions.create_calendar(credentials=creds, summary=request.summary)
     if result is None:
+        logger.error(f"Action 'create_calendar' for summary '{request.summary}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to create calendar via Google API.")
+    logger.info(f"Endpoint 'create_calendar' completed. Calendar ID: {result.id}")
     return result
 
 # --- Events Endpoints ---
@@ -270,8 +319,8 @@ def create_calendar_endpoint(
 )
 def find_events_endpoint(
     calendar_id: str = Path(..., description="Calendar identifier (e.g., 'primary', email address, or calendar ID)."),
-    time_min: Optional[datetime] = Query(None, description="Start time (inclusive, RFC3339 format)."),
-    time_max: Optional[datetime] = Query(None, description="End time (exclusive, RFC3339 format)."),
+    time_min_str: Optional[str] = Query(None, alias="time_min", description="Start time (inclusive, RFC3339 format string)."),
+    time_max_str: Optional[str] = Query(None, alias="time_max", description="End time (exclusive, RFC3339 format string)."),
     query: Optional[str] = Query(None, alias="q", description="Free text search query."),
     max_results: int = Query(50, ge=1, le=2500, description="Maximum results per page."),
     single_events: bool = Query(True, description="Expand recurring events."),
@@ -279,11 +328,27 @@ def find_events_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Finds events in a specified calendar."""
+    logger.info(f"Endpoint 'find_events' called for calendar '{calendar_id}'.")
+    logger.debug(f"Raw Params: time_min_str='{time_min_str}', time_max_str='{time_max_str}', q='{query}', max_results={max_results}, single_events={single_events}, order_by='{order_by}'")
+
+    # Manually parse time strings using dateutil.parser
+    time_min_dt: Optional[datetime] = None
+    time_max_dt: Optional[datetime] = None
+    try:
+        if time_min_str:
+            time_min_dt = parser.isoparse(time_min_str)
+        if time_max_str:
+            time_max_dt = parser.isoparse(time_max_str)
+    except ValueError as e:
+        logger.error(f"Failed to parse time strings: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid time format provided: {e}")
+
+    # Now call the action function with parsed datetime objects
     result = calendar_actions.find_events(
         credentials=creds,
         calendar_id=calendar_id,
-        time_min=time_min,
-        time_max=time_max,
+        time_min=time_min_dt, # Pass parsed datetime
+        time_max=time_max_dt, # Pass parsed datetime
         query=query,
         max_results=max_results,
         single_events=single_events,
@@ -292,7 +357,9 @@ def find_events_endpoint(
     if result is None:
         # Distinguish between API error and just no events?
         # For now, assume None means API error.
+        logger.error(f"Action 'find_events' for calendar '{calendar_id}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to retrieve events from Google API.")
+    logger.info(f"Endpoint 'find_events' for calendar '{calendar_id}' completed. Found {len(result.items)} events.")
     return result
 
 @app.post(
@@ -310,6 +377,8 @@ def create_event_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Creates a new event with detailed information."""
+    logger.info(f"Endpoint 'create_event' called for calendar '{calendar_id}'. Summary: '{event_data.summary}'")
+    logger.debug(f"Event data: {event_data.dict(exclude_unset=True)}")
     result = calendar_actions.create_event(
         credentials=creds,
         event_data=event_data,
@@ -317,7 +386,9 @@ def create_event_endpoint(
         send_notifications=send_notifications
     )
     if result is None:
+        logger.error(f"Action 'create_event' for calendar '{calendar_id}', summary '{event_data.summary}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to create event via Google API.")
+    logger.info(f"Endpoint 'create_event' completed. Event ID: {result.id}")
     return result
 
 @app.post(
@@ -335,6 +406,7 @@ def quick_add_event_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Creates an event from a simple text string."""
+    logger.info(f"Endpoint 'quick_add_event' called for calendar '{calendar_id}'. Text: '{request_data.text}'")
     result = calendar_actions.quick_add_event(
         credentials=creds,
         text=request_data.text,
@@ -343,7 +415,9 @@ def quick_add_event_endpoint(
     )
     if result is None:
         # Consider 400 if text was likely unparseable? Hard to know.
+        logger.error(f"Action 'quick_add_event' for calendar '{calendar_id}', text '{request_data.text}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to quick-add event via Google API.")
+    logger.info(f"Endpoint 'quick_add_event' completed. Event ID: {result.id}")
     return result
 
 @app.patch(
@@ -361,6 +435,8 @@ def update_event_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Updates specified fields of an existing event."""
+    logger.info(f"Endpoint 'update_event' called for event '{event_id}' in calendar '{calendar_id}'.")
+    logger.debug(f"Update data: {update_data.dict(exclude_unset=True)}")
     result = calendar_actions.update_event(
         credentials=creds,
         event_id=event_id,
@@ -372,9 +448,10 @@ def update_event_endpoint(
         # update_event handles 404 logging, but we might want to return 404 here
         # Need a way for the action function to signal the error type
         # For now, assume 500 for any None return
-        raise HTTPException(status_code=500, detail=f"Failed to update event '{event_id}'. Check server logs.")
-        # Or check logs within the action? How to get the status code back?
         # Alternative: Raise custom exceptions from actions
+        logger.error(f"Action 'update_event' for event '{event_id}' returned None. Raising HTTPException.")
+        raise HTTPException(status_code=500, detail=f"Failed to update event '{event_id}'. Check server logs.")
+    logger.info(f"Endpoint 'update_event' completed for event '{event_id}'.")
     return result
 
 @app.delete(
@@ -391,6 +468,7 @@ def delete_event_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Deletes an event."""
+    logger.info(f"Endpoint 'delete_event' called for event '{event_id}' in calendar '{calendar_id}'.")
     success = calendar_actions.delete_event(
         credentials=creds,
         event_id=event_id,
@@ -399,8 +477,10 @@ def delete_event_endpoint(
     )
     if not success:
         # delete_event handles 404 logging
+        logger.error(f"Action 'delete_event' for event '{event_id}' returned False. Raising HTTPException.")
         raise HTTPException(status_code=500, detail=f"Failed to delete event '{event_id}'. It might not exist or an API error occurred.")
     # No body needed for 204 response
+    logger.info(f"Endpoint 'delete_event' completed successfully for event '{event_id}'.")
     return None
 
 @app.post(
@@ -420,6 +500,7 @@ def add_attendee_endpoint(
     """Adds one or more attendees to an existing event.
        Note: This retrieves the event, adds the new emails to the existing list, and patches the event.
     """
+    logger.info(f"Endpoint 'add_attendee' called for event '{event_id}'. Attendees: {request_data.attendee_emails}")
     result = calendar_actions.add_attendee(
         credentials=creds,
         event_id=event_id,
@@ -428,7 +509,9 @@ def add_attendee_endpoint(
         send_notifications=send_notifications
     )
     if result is None:
+        logger.error(f"Action 'add_attendee' for event '{event_id}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail=f"Failed to add attendees to event '{event_id}'. Check logs.")
+    logger.info(f"Endpoint 'add_attendee' completed for event '{event_id}'.")
     return result
 
 # --- Advanced Scheduling & Analysis Endpoints ---
@@ -445,6 +528,7 @@ def check_attendee_status_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Checks the response status ('accepted', 'declined', etc.) for attendees of a specific event."""
+    logger.info(f"Endpoint 'check_attendee_status' called for event '{request.event_id}'. Calendar: '{request.calendar_id}'. Attendees: {request.attendee_emails or 'All'}")
     status_dict = calendar_actions.check_attendee_status(
         credentials=creds,
         event_id=request.event_id,
@@ -453,7 +537,9 @@ def check_attendee_status_endpoint(
     )
     if status_dict is None:
         # Could be 404 if event not found, but action logs this.
+        logger.error(f"Action 'check_attendee_status' for event '{request.event_id}' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail=f"Failed to check attendee status for event '{request.event_id}'. Event might not exist or API error.")
+    logger.info(f"Endpoint 'check_attendee_status' completed for event '{request.event_id}'. Found status for {len(status_dict)} attendees.")
     return CheckAttendeeStatusResponse(status_map=status_dict)
 
 @app.post(
@@ -468,8 +554,9 @@ def query_free_busy_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Queries the free/busy information for a list of calendars over a time period."""
-    # Extract calendar IDs from the request items
     calendar_ids = [item.id for item in request.items]
+    logger.info(f"Endpoint 'query_free_busy' called. Calendars: {calendar_ids}")
+    logger.debug(f"Time range: {request.time_min} to {request.time_max}")
 
     # Call the action function (which now returns the complex dict)
     busy_info_dict = calendar_actions.find_availability(
@@ -480,6 +567,7 @@ def query_free_busy_endpoint(
     )
 
     if busy_info_dict is None:
+        logger.error("Action 'find_availability' returned None. Raising HTTPException.")
         raise HTTPException(status_code=500, detail="Failed to query free/busy information via Google API.")
 
     # Convert the result from find_availability back into the FreeBusyResponse model structure
@@ -511,6 +599,8 @@ def schedule_mutual_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Finds the first available time slot for multiple attendees and schedules the provided event details."""
+    logger.info(f"Endpoint 'schedule_mutual' called. Attendees: {request.attendee_calendar_ids}. Duration: {request.duration_minutes} mins.")
+    logger.debug(f"Time range: {request.time_min} to {request.time_max}. Organizer: {request.organizer_calendar_id}. Event Summary: {request.event_details.summary}")
     # Parse working hours strings into time objects
     working_hours_start = None
     working_hours_end = None
@@ -538,8 +628,9 @@ def schedule_mutual_endpoint(
     if created_event is None:
         # Could be no slot found, or failed to create event after finding slot.
         # Action function logs the reason.
+        logger.error("Action 'find_mutual_availability_and_schedule' returned None. Raising HTTPException.")
         raise HTTPException(status_code=409, detail="Could not schedule event. No suitable time slot found or event creation failed.") # 409 Conflict maybe?
-
+    logger.info(f"Endpoint 'schedule_mutual' completed successfully. Event ID: {created_event.id}")
     return created_event
 
 @app.post(
@@ -554,6 +645,8 @@ def project_recurring_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Finds recurring events and projects their future occurrences within a time window."""
+    logger.info(f"Endpoint 'project_recurring' called. Calendar: '{request.calendar_id}'. Query: '{request.event_query}'")
+    logger.debug(f"Time range: {request.time_min} to {request.time_max}")
     # Note: calendar_actions.get_projected_recurring_events returns List[ProjectedEventOccurrence]
     # We need to convert this to List[ProjectedEventOccurrenceModel] for the response.
     occurrences: List[ProjectedEventOccurrence] = calendar_actions.get_projected_recurring_events(
@@ -569,6 +662,7 @@ def project_recurring_endpoint(
         ProjectedEventOccurrenceModel(**occ.__dict__) for occ in occurrences
     ]
 
+    logger.info(f"Endpoint 'project_recurring' completed. Found {len(response_occurrences)} projected occurrences.")
     return ProjectRecurringResponse(projected_occurrences=response_occurrences)
 
 @app.post(
@@ -583,6 +677,8 @@ def analyze_busyness_endpoint(
     creds: Credentials = Depends(get_current_credentials)
 ):
     """Analyzes event count and total duration per day within a specified time window."""
+    logger.info(f"Endpoint 'analyze_busyness' called. Calendar: '{request.calendar_id}'")
+    logger.debug(f"Time range: {request.time_min} to {request.time_max}")
     # We need a wrapper in calendar_actions for analyze_busyness from analysis.py
     # Let's add one now.
     busyness_dict = calendar_actions.get_busyness_analysis( # Call the wrapper function
@@ -593,6 +689,7 @@ def analyze_busyness_endpoint(
     )
 
     if busyness_dict is None: # Wrapper returns None on error
+         logger.error("Action 'get_busyness_analysis' returned None. Raising HTTPException.")
          raise HTTPException(status_code=500, detail="Failed to analyze busyness.")
 
     # Convert date keys to strings (YYYY-MM-DD) for JSON compatibility
