@@ -11,6 +11,31 @@ logger = logging.getLogger(__name__)
 
 # Function to run the MCP server in a separate thread
 def run_mcp_server():
+    # Redirect stdout logs to a file when in MCP mode
+    import sys
+    import logging
+    
+    # Configure logging to file only when in MCP mode
+    file_handler = logging.FileHandler('calendar_mcp.log')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Replace console handlers with file handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        if isinstance(handler, logging.StreamHandler):
+            root_logger.removeHandler(handler)
+    root_logger.addHandler(file_handler)
+    
+    # Ensure uvicorn logs also go to file
+    uvicorn_logger = logging.getLogger("uvicorn")
+    for handler in uvicorn_logger.handlers[:]:
+        uvicorn_logger.removeHandler(handler)
+    uvicorn_logger.addHandler(file_handler)
+    
+    logger.info("Redirected logs to file for MCP mode")
+    
+    # Import and run MCP server
     from src.mcp_bridge import create_mcp_server
     mcp = create_mcp_server()
     logger.info("Starting MCP server with stdio transport")
@@ -49,7 +74,7 @@ if __name__ == "__main__":
 
     # Run the Uvicorn server
     try:
-        uvicorn.run("src.server:app", host=host, port=port, reload=reload) 
+        uvicorn.run("src.server:app", host=host, port=port, reload=reload, log_level="error") 
     except Exception as e:
         logger.error(f"Error starting server: {e}")
         sys.exit(1) 
