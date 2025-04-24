@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date, timedelta, time
+from datetime import datetime, date, timedelta, time, timezone
 from typing import Optional, List, Dict, Any, Tuple
 from dateutil import parser # For robust datetime parsing
 import json
@@ -324,9 +324,58 @@ def update_event(
     if not service:
         return None
 
-    # Use .dict(exclude_unset=True) to only include fields explicitly set in the request model
-    # Use by_alias=True to ensure correct Google API field names (e.g., 'dateTime')
-    update_body = update_data.dict(by_alias=True, exclude_unset=True)
+    # Manually construct the update body dictionary
+    update_body: Dict[str, Any] = {}
+
+    # Helper function (can be reused or defined locally)
+    def format_datetime_field(dt_obj: datetime) -> str:
+        if dt_obj.tzinfo is None:
+            return dt_obj.isoformat() + 'Z'
+        else:
+            return dt_obj.isoformat()
+
+    # Populate update_body only with fields present in update_data
+    if update_data.summary is not None:
+        update_body['summary'] = update_data.summary
+    if update_data.description is not None:
+        update_body['description'] = update_data.description
+    if update_data.location is not None:
+        update_body['location'] = update_data.location
+
+    # Handle start time - need to format if present
+    if update_data.start is not None:
+        start_details = {}
+        if update_data.start.dateTime:
+            start_details['dateTime'] = format_datetime_field(update_data.start.dateTime)
+            if update_data.start.timeZone:
+                start_details['timeZone'] = update_data.start.timeZone
+        elif update_data.start.date:
+            start_details['date'] = str(update_data.start.date)
+        # Add check if neither date nor dateTime provided in start? Unlikely via model validation.
+        if start_details: # Only add 'start' if we have valid sub-fields
+            update_body['start'] = start_details
+
+    # Handle end time - need to format if present
+    if update_data.end is not None:
+        end_details = {}
+        if update_data.end.dateTime:
+            end_details['dateTime'] = format_datetime_field(update_data.end.dateTime)
+            if update_data.end.timeZone:
+                end_details['timeZone'] = update_data.end.timeZone
+        elif update_data.end.date:
+            end_details['date'] = str(update_data.end.date)
+        # Add check if neither date nor dateTime provided in end?
+        if end_details: # Only add 'end' if we have valid sub-fields
+            update_body['end'] = end_details
+            
+    # Handle attendees - PATCH replaces the attendee list
+    if update_data.attendees is not None:
+        # Convert EventAttendee models back to simple dicts for API
+        update_body['attendees'] = [
+            attendee.dict(by_alias=True, exclude_unset=True) 
+            for attendee in update_data.attendees
+        ]
+    # Add other updatable fields from EventUpdateRequest if needed
 
     if not update_body:
         logger.warning(f"Update called for event {event_id} with no fields to update.")
@@ -339,16 +388,6 @@ def update_event(
         except HttpError as e:
             logger.error(f"Failed to retrieve event {event_id} after empty update request: {e}")
             return None
-
-    # Handle attendees if present in update_body
-    # Need to decide on update semantics: replace all attendees or patch?
-    # Google API patch usually replaces the entire attendees list if provided.
-    if 'attendees' in update_body and update_body['attendees'] is not None:
-        # Assuming EventUpdateRequest.attendees expects the full EventAttendee model structure
-        # We need to convert it back to the simple list of dicts for the API
-        pass # Handled by .dict(by_alias=True)
-        # If EventUpdateRequest.attendees was just a list of emails, formatting would be needed:
-        # update_body['attendees'] = [{'email': email} for email in update_body['attendees']]
 
     logger.info(f"Updating event '{event_id}' in calendar '{calendar_id}'.")
     logger.debug(f"Update body for patch: {update_body}")
@@ -816,49 +855,112 @@ def _find_first_available_slot(
     working_hours_start: Optional[time] = None,
     working_hours_end: Optional[time] = None,
 ) -> Optional[Tuple[datetime, datetime]]:
-    """Finds the first available time slot of a given duration within a range, considering busy times and working hours."""
-    current_time = time_min
+    """Finds the first available time slot of a given duration within a range, considering busy times and working hours.
+       Ensures the search starts from the current time if time_min is in the past.
+    """
+    logger.info("--- Entering _find_first_available_slot ---")
+    logger.debug(f"Initial inputs: time_min={time_min}, time_max={time_max}, duration={duration}")
 
-    # Ensure working hours are applied correctly regardless of date part
+    # --- Ensure Timezones (use UTC for consistency) ---
+    try:
+        logger.debug(f"Original time_min tz: {time_min.tzinfo}, time_max tz: {time_max.tzinfo}")
+        time_min_utc = time_min.astimezone(timezone.utc) if time_min.tzinfo else time_min.replace(tzinfo=timezone.utc)
+        time_max_utc = time_max.astimezone(timezone.utc) if time_max.tzinfo else time_max.replace(tzinfo=timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        logger.debug(f"Normalized to UTC: time_min={time_min_utc}, time_max={time_max_utc}, now={now_utc}")
+    except Exception as tz_err:
+        logger.error(f"Error normalizing timezones to UTC: {tz_err}")
+        # Fallback, though less ideal
+        time_min_utc = time_min
+        time_max_utc = time_max
+        now_utc = datetime.now()
+        # Ensure comparison is possible if fallback occurred
+        if time_min_utc.tzinfo is None and now_utc.tzinfo is not None:
+            now_utc = now_utc.replace(tzinfo=None)
+        elif time_min_utc.tzinfo is not None and now_utc.tzinfo is None:
+             logger.warning("Cannot reliably compare naive now() with timezone-aware time_min in fallback.")
+             # Consider returning None or raising error here
+
+    # Determine effective start time (MUST be in the future)
+    effective_start = max(time_min_utc, now_utc)
+    # Log at INFO level for visibility
+    logger.info(f"Search range: {time_min_utc} to {time_max_utc}. Current time: {now_utc}. Effective start for search: {effective_start}")
+
+    # Adjust merged busy intervals to be UTC as well for correct comparison
+    busy_intervals_utc = []
+    for interval in busy_intervals:
+        try:
+            start_utc = interval['start'].astimezone(timezone.utc) if interval['start'].tzinfo else interval['start'].replace(tzinfo=timezone.utc)
+            end_utc = interval['end'].astimezone(timezone.utc) if interval['end'].tzinfo else interval['end'].replace(tzinfo=timezone.utc)
+            busy_intervals_utc.append({'start': start_utc, 'end': end_utc})
+        except Exception as busy_tz_err:
+             logger.warning(f"Could not normalize busy interval {interval} to UTC: {busy_tz_err}")
+             # Skip this interval or handle error appropriately
+
+    # Sort busy intervals (important for gap logic)
+    busy_intervals_utc.sort(key=lambda x: x['start'])
+
+    # --- Refactored Slot Finding Logic ---
+    current_search_time = effective_start
+    logger.info(f"Search pointer initialized to: {current_search_time}")
+
+    # --- Working Hours Check (Placeholder - implement timezone logic if needed) ---
     def is_within_working_hours(slot_start: datetime, slot_end: datetime) -> bool:
         if not working_hours_start or not working_hours_end:
             return True # No working hours constraint
-        # Check if the slot STARTS and ENDS within working hours on its day
-        # Naive comparison assumes datetimes are in the same timezone
-        return (working_hours_start <= slot_start.time() and
-                slot_end.time() <= working_hours_end and
-                slot_start.date() == slot_end.date()) # Ensure slot doesn't cross midnight if working hours defined
+        # WARNING: This naive comparison assumes slot times are in local time
+        # matching working_hours_start/end. Proper implementation requires
+        # converting slot_start/end back to the relevant local timezone first.
+        # For now, proceeding with naive check or ignoring if WH not set.
+        try:
+            # Attempt comparison assuming compatible types/timezones
+             return (working_hours_start <= slot_start.time() and
+                     slot_end.time() <= working_hours_end and
+                     slot_start.date() == slot_end.date())
+        except TypeError as te:
+            logger.warning(f"Could not compare working hours due to timezone mismatch or type error: {te}. Ignoring working hours constraint for this slot.")
+            return True # Default to True if comparison fails
+    # --- End Working Hours Check ---
 
-    # Iterate through the gaps *before* each busy interval
-    for busy in busy_intervals:
-        free_slot_start = current_time
-        free_slot_end = busy['start']
-        available_duration = free_slot_end - free_slot_start
+    while current_search_time < time_max_utc:
+        potential_end_time = current_search_time + duration
 
-        if available_duration >= duration:
-            potential_start = free_slot_start
-            potential_end = potential_start + duration
-            # Check if this slot fits and respects working hours
-            if potential_end <= free_slot_end and is_within_working_hours(potential_start, potential_end):
-                logger.debug(f"Found available slot (before busy interval): {potential_start} - {potential_end}")
-                return potential_start, potential_end
+        # Check if slot goes beyond the overall search window
+        if potential_end_time > time_max_utc:
+            logger.info(f"Potential slot end {potential_end_time} exceeds time_max {time_max_utc}. Search finished.")
+            break # Stop searching
 
-        # Move current time to the end of the current busy interval for the next gap check
-        current_time = max(current_time, busy['end'])
+        # Check for overlap with any busy interval
+        overlap_found = False
+        for busy in busy_intervals_utc:
+            # Check if the potential slot overlaps with this busy interval
+            # Overlap definition: (SlotStart < BusyEnd) and (SlotEnd > BusyStart)
+            if current_search_time < busy['end'] and potential_end_time > busy['start']:
+                # Overlap found. Move search time to the end of this busy interval.
+                logger.debug(f"Potential slot {current_search_time} - {potential_end_time} overlaps with busy {busy['start']} - {busy['end']}. Jumping search time.")
+                current_search_time = busy['end']
+                overlap_found = True
+                break # Break inner loop, restart outer while loop check
+        
+        if overlap_found:
+            continue # Restart the while loop with the adjusted current_search_time
 
-    # Check the final gap *after* the last busy interval
-    free_slot_start = current_time
-    free_slot_end = time_max
-    available_duration = free_slot_end - free_slot_start
-
-    if available_duration >= duration:
-        potential_start = free_slot_start
-        potential_end = potential_start + duration
-        if potential_end <= free_slot_end and is_within_working_hours(potential_start, potential_end):
-             logger.debug(f"Found available slot (after last busy interval): {potential_start} - {potential_end}")
-             return potential_start, potential_end
-
-    logger.debug("No suitable available slot found within the given constraints.")
+        # If we reach here, the slot [current_search_time, potential_end_time] is free
+        # Check working hours
+        # TODO: Implement proper timezone conversion for working hours check if needed
+        if is_within_working_hours(current_search_time, potential_end_time):
+            logger.info(f"Found available slot: {current_search_time} - {potential_end_time}")
+            return current_search_time, potential_end_time
+        else:
+            # Slot is free but outside working hours. Move search time forward.
+            # A simple jump might be to the start of the next working hour block, 
+            # but for now, just advance slightly to check the next possible interval.
+            # Advancing by duration ensures we check the next non-overlapping slot.
+            logger.debug(f"Slot {current_search_time} - {potential_end_time} rejected due to working hours. Advancing search time.")
+            current_search_time += timedelta(minutes=15) # Or duration? Let's try 15 min increment.
+            
+    # Looped through entire window without finding a suitable slot
+    logger.info("No suitable available slot found within the time window.")
     return None
 
 def find_mutual_availability_and_schedule(
@@ -953,6 +1055,10 @@ def find_mutual_availability_and_schedule(
     # Ensure all required attendees are in the event data
     existing_attendees = {att.email for att in final_event_data.attendees} if final_event_data.attendees else set()
     for email in attendee_calendar_ids:
+        # Skip adding 'primary' as an attendee email
+        if email == 'primary': 
+            continue
+            
         if email not in existing_attendees:
             if final_event_data.attendees is None:
                 final_event_data.attendees = []

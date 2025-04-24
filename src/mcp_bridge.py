@@ -16,7 +16,7 @@ def create_mcp_server():
     mcp = FastMCP("calendar-mcp")
     
     @mcp.tool()
-    async def list_calendars(min_access_role: Optional[str] = None) -> str:
+    async def list_calendars(min_access_role: str = None) -> str:
         """Lists the calendars on the user's calendar list.
         
         Args:
@@ -41,8 +41,8 @@ def create_mcp_server():
             return json.dumps({"error": error_msg})
 
     @mcp.tool()
-    async def find_events(calendar_id: str, time_min: Optional[str] = None, 
-                         time_max: Optional[str] = None, query: Optional[str] = None,
+    async def find_events(calendar_id: str, time_min: str = None, 
+                         time_max: str = None, query: str = None,
                          max_results: int = 50) -> str:
         """Find events in a specified calendar.
         
@@ -76,9 +76,9 @@ def create_mcp_server():
 
     @mcp.tool()
     async def create_event(calendar_id: str, summary: str, start_time: str, 
-                          end_time: str, description: Optional[str] = None,
-                          location: Optional[str] = None, 
-                          attendee_emails: Optional[List[str]] = None) -> str:
+                          end_time: str, description: str = None,
+                          location: str = None, 
+                          attendee_emails: List[str] = None) -> str:
         """Creates a new event with detailed information.
         
         Args:
@@ -145,17 +145,17 @@ def create_mcp_server():
             return json.dumps({"error": error_msg})
     
     @mcp.tool()
-    async def update_event(calendar_id: str, event_id: str, summary: Optional[str] = None, 
-                          start_time: Optional[str] = None, end_time: Optional[str] = None,
-                          description: Optional[str] = None, location: Optional[str] = None) -> str:
+    async def update_event(calendar_id: str, event_id: str, summary: str = None, 
+                          start_time: str = None, end_time: str = None,
+                          description: str = None, location: str = None) -> str:
         """Updates an existing event.
         
         Args:
             calendar_id: Calendar identifier.
             event_id: Event identifier.
             summary: New title for the event.
-            start_time: New start time in ISO format.
-            end_time: New end time in ISO format.
+            start_time: New start time in ISO 8601 format (e.g., 'YYYY-MM-DDTHH:MM:SSZ' or 'YYYY-MM-DDTHH:MM:SS+HH:MM').
+            end_time: New end time in ISO 8601 format (e.g., 'YYYY-MM-DDTHH:MM:SSZ' or 'YYYY-MM-DDTHH:MM:SS+HH:MM').
             description: New description for the event.
             location: New location for the event.
         """
@@ -236,7 +236,7 @@ def create_mcp_server():
     
     @mcp.tool()
     async def check_attendee_status(event_id: str, calendar_id: str = "primary", 
-                                   attendee_emails: Optional[List[str]] = None) -> str:
+                                   attendee_emails: List[str] = None) -> str:
         """Checks the response status for attendees of a specific event.
         
         Args:
@@ -294,7 +294,7 @@ def create_mcp_server():
     @mcp.tool()
     async def schedule_mutual(attendee_calendar_ids: List[str], time_min: str, 
                              time_max: str, duration_minutes: int, 
-                             summary: str, description: Optional[str] = None) -> str:
+                             summary: str, description: str = None) -> str:
         """Finds the first available time slot for multiple attendees and schedules an event.
         
         Args:
@@ -312,7 +312,9 @@ def create_mcp_server():
                 "time_max": time_max,
                 "duration_minutes": duration_minutes,
                 "event_details": {
-                    "summary": summary
+                    "summary": summary,
+                    "start": {"date": "1970-01-01"},
+                    "end": {"date": "1970-01-01"}
                 }
             }
             if description:
