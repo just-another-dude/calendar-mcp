@@ -1314,16 +1314,20 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 event_id=arguments["event_id"]
             )
         elif tool_name == "check_free_busy":
-            result = calendar_actions.check_free_busy(
+            # Parse time strings to datetime objects
+            time_min_dt = parser.isoparse(arguments["time_min"]) if isinstance(arguments["time_min"], str) else arguments["time_min"]
+            time_max_dt = parser.isoparse(arguments["time_max"]) if isinstance(arguments["time_max"], str) else arguments["time_max"]
+
+            result = calendar_actions.find_availability(
                 credentials=creds,
                 calendar_ids=arguments["calendar_ids"],
-                time_min=arguments["time_min"],
-                time_max=arguments["time_max"]
+                time_min=time_min_dt,
+                time_max=time_max_dt
             )
         elif tool_name == "voice_book_appointment":
             # Voice-optimized booking using natural language
             try:
-                booking_result = calendar_actions.create_quick_add_event(
+                booking_result = calendar_actions.quick_add_event(
                     credentials=creds,
                     calendar_id=arguments.get("calendar_id", "primary"),
                     text=arguments["natural_language_request"]
@@ -1331,19 +1335,19 @@ async def handle_mcp_tool_call(request_id, params, creds):
 
                 if booking_result:
                     # Format response in voice-friendly way
-                    event_start = booking_result.get('start', {})
-                    if 'dateTime' in event_start:
-                        from dateutil import parser as date_parser
-                        start_time = date_parser.parse(event_start['dateTime'])
-                        formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+                    event_start = booking_result.start
+                    if event_start and event_start.dateTime:
+                        formatted_time = event_start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                    elif event_start and event_start.date:
+                        formatted_time = f"All day on {event_start.date.strftime('%A, %B %d')}"
                     else:
-                        formatted_time = event_start.get('date', 'the requested date')
+                        formatted_time = "the requested time"
 
                     result = {
                         "success": True,
-                        "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{booking_result.get('summary', 'Appointment')}' has been added to your calendar.",
-                        "event_id": booking_result.get('id'),
-                        "event_link": booking_result.get('htmlLink')
+                        "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{booking_result.summary or 'Appointment'}' has been added to your calendar.",
+                        "event_id": booking_result.id,
+                        "event_link": booking_result.html_link
                     }
                 else:
                     result = {
@@ -1376,15 +1380,18 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 time_max = target_date.replace(hour=17, minute=0, second=0, microsecond=0)
 
                 # Check for busy periods
-                busy_periods = calendar_actions.check_free_busy(
+                busy_periods = calendar_actions.find_availability(
                     credentials=creds,
                     calendar_ids=[arguments.get("calendar_id", "primary")],
-                    time_min=time_min.isoformat() + 'Z',
-                    time_max=time_max.isoformat() + 'Z'
+                    time_min=time_min,
+                    time_max=time_max
                 )
 
                 calendar_id = arguments.get("calendar_id", "primary")
-                busy_count = len(busy_periods.get(calendar_id, [])) if busy_periods else 0
+                busy_count = 0
+                if busy_periods and calendar_id in busy_periods:
+                    busy_intervals = busy_periods[calendar_id].get('busy', [])
+                    busy_count = len(busy_intervals)
 
                 if busy_count == 0:
                     message = f"You're completely free on {target_date.strftime('%A, %B %d')} during business hours."
@@ -1416,14 +1423,14 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 events_response = calendar_actions.find_events(
                     credentials=creds,
                     calendar_id=arguments.get("calendar_id", "primary"),
-                    time_min=time_min.isoformat() + 'Z',
-                    time_max=time_max.isoformat() + 'Z',
+                    time_min=time_min,
+                    time_max=time_max,
                     max_results=arguments.get("limit", 5),
                     order_by='startTime',
                     single_events=True
                 )
 
-                events = events_response.get('items', []) if events_response else []
+                events = events_response.items if events_response else []
 
                 if not events:
                     result = {
@@ -1436,19 +1443,19 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     # Format events for voice response
                     voice_events = []
                     for event in events:
-                        start = event.get('start', {})
-                        if 'dateTime' in start:
-                            from dateutil import parser as date_parser
-                            start_time = date_parser.parse(start['dateTime'])
-                            formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+                        start = event.start
+                        if start and start.dateTime:
+                            formatted_time = start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                        elif start and start.date:
+                            formatted_time = f"All day on {start.date.strftime('%A, %B %d')}"
                         else:
-                            formatted_time = start.get('date', 'All day')
+                            formatted_time = "Time not specified"
 
                         voice_events.append({
-                            "summary": event.get('summary', 'Untitled Event'),
+                            "summary": event.summary or 'Untitled Event',
                             "start_time": formatted_time,
-                            "location": event.get('location', ''),
-                            "description": event.get('description', '')[:100] if event.get('description') else ''
+                            "location": event.location or '',
+                            "description": (event.description or '')[:100] if event.description else ''
                         })
 
                     if len(events) == 1:
@@ -1602,7 +1609,7 @@ def voice_book_appointment(
         logger.info(f"Voice booking request: {natural_language_request}")
 
         # Use Google's quick add feature for natural language parsing
-        result = calendar_actions.create_quick_add_event(
+        result = calendar_actions.quick_add_event(
             credentials=creds,
             calendar_id=calendar_id,
             text=natural_language_request
@@ -1616,21 +1623,21 @@ def voice_book_appointment(
             }
 
         # Format response for voice agent
-        event_start = result.get('start', {})
-        event_end = result.get('end', {})
+        event_start = result.start
 
         # Parse datetime for voice-friendly response
-        if 'dateTime' in event_start:
-            start_time = parser.parse(event_start['dateTime'])
-            formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+        if event_start and event_start.dateTime:
+            formatted_time = event_start.dateTime.strftime("%A, %B %d at %I:%M %p")
+        elif event_start and event_start.date:
+            formatted_time = f"All day on {event_start.date.strftime('%A, %B %d')}"
         else:
-            formatted_time = event_start.get('date', 'the requested date')
+            formatted_time = "the requested time"
 
         return {
             "success": True,
-            "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{result.get('summary', 'Appointment')}' has been added to your calendar.",
-            "event_id": result.get('id'),
-            "event_link": result.get('htmlLink'),
+            "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{result.summary or 'Appointment'}' has been added to your calendar.",
+            "event_id": result.id,
+            "event_link": result.html_link,
             "calendar_id": calendar_id
         }
 
@@ -1684,23 +1691,25 @@ def voice_check_availability(
         time_max = target_date.replace(hour=17, minute=0, second=0, microsecond=0)
 
         # Check for busy periods
-        busy_periods = calendar_actions.check_free_busy(
+        busy_periods = calendar_actions.find_availability(
             credentials=creds,
             calendar_ids=[calendar_id],
-            time_min=time_min.isoformat() + 'Z',
-            time_max=time_max.isoformat() + 'Z'
+            time_min=time_min,
+            time_max=time_max
         )
 
-        if not busy_periods or calendar_id not in busy_periods:
+        busy_count = 0
+        if busy_periods and calendar_id in busy_periods:
+            busy_intervals = busy_periods[calendar_id].get('busy', [])
+            busy_count = len(busy_intervals)
+
+        if busy_count == 0:
             return {
                 "success": True,
                 "message": f"You appear to be completely free on {target_date.strftime('%A, %B %d')} during business hours.",
                 "availability": "free",
                 "suggested_times": ["9:00 AM", "10:00 AM", "11:00 AM", "2:00 PM", "3:00 PM"]
             }
-
-        # Analyze busy periods
-        busy_count = len(busy_periods[calendar_id])
 
         if busy_count == 0:
             message = f"You're completely free on {target_date.strftime('%A, %B %d')}."
@@ -1748,14 +1757,14 @@ def voice_get_upcoming_appointments(
         events_response = calendar_actions.find_events(
             credentials=creds,
             calendar_id=calendar_id,
-            time_min=time_min.isoformat() + 'Z',
-            time_max=time_max.isoformat() + 'Z',
+            time_min=time_min,
+            time_max=time_max,
             max_results=limit,
             order_by='startTime',
             single_events=True
         )
 
-        if not events_response or 'items' not in events_response:
+        if not events_response:
             return {
                 "success": True,
                 "message": "You don't have any appointments coming up in the next week. Your schedule is clear!",
@@ -1763,7 +1772,7 @@ def voice_get_upcoming_appointments(
                 "events": []
             }
 
-        events = events_response['items']
+        events = events_response.items
 
         if not events:
             return {
@@ -1776,18 +1785,19 @@ def voice_get_upcoming_appointments(
         # Format events for voice response
         voice_events = []
         for event in events:
-            start = event.get('start', {})
-            if 'dateTime' in start:
-                start_time = parser.parse(start['dateTime'])
-                formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+            start = event.start
+            if start and start.dateTime:
+                formatted_time = start.dateTime.strftime("%A, %B %d at %I:%M %p")
+            elif start and start.date:
+                formatted_time = f"All day on {start.date.strftime('%A, %B %d')}"
             else:
-                formatted_time = start.get('date', 'All day')
+                formatted_time = "Time not specified"
 
             voice_events.append({
-                "summary": event.get('summary', 'Untitled Event'),
+                "summary": event.summary or 'Untitled Event',
                 "start_time": formatted_time,
-                "location": event.get('location', ''),
-                "description": event.get('description', '')[:100] if event.get('description') else ''
+                "location": event.location or '',
+                "description": (event.description or '')[:100] if event.description else ''
             })
 
         # Create voice-friendly summary
@@ -1835,33 +1845,34 @@ def voice_cancel_appointment(
         events_response = calendar_actions.find_events(
             credentials=creds,
             calendar_id=calendar_id,
-            time_min=time_min.isoformat() + 'Z',
-            time_max=time_max.isoformat() + 'Z',
-            q=appointment_description,  # Search query
+            time_min=time_min,
+            time_max=time_max,
+            query=appointment_description,  # Search query
             single_events=True
         )
 
-        if not events_response or 'items' not in events_response or not events_response['items']:
+        if not events_response or not events_response.items:
             return {
                 "success": False,
                 "message": f"I couldn't find any appointments matching '{appointment_description}'. Could you be more specific or check if the appointment exists?",
                 "found_events": 0
             }
 
-        events = events_response['items']
+        events = events_response.items
 
         # If multiple events found, return them for user to choose
         if len(events) > 1:
             event_list = []
             for i, event in enumerate(events[:3]):  # Limit to 3 for voice response
-                start = event.get('start', {})
-                if 'dateTime' in start:
-                    start_time = parser.parse(start['dateTime'])
-                    formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+                start = event.start
+                if start and start.dateTime:
+                    formatted_time = start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                elif start and start.date:
+                    formatted_time = f"All day on {start.date.strftime('%A, %B %d')}"
                 else:
-                    formatted_time = start.get('date', 'All day')
+                    formatted_time = "Time not specified"
 
-                event_list.append(f"{i+1}. {event.get('summary', 'Untitled')} on {formatted_time}")
+                event_list.append(f"{i+1}. {event.summary or 'Untitled'} on {formatted_time}")
 
             return {
                 "success": False,
@@ -1873,7 +1884,7 @@ def voice_cancel_appointment(
 
         # Cancel the single found event
         event = events[0]
-        event_id = event['id']
+        event_id = event.id
 
         success = calendar_actions.delete_event(
             credentials=creds,
@@ -1882,17 +1893,18 @@ def voice_cancel_appointment(
         )
 
         if success:
-            start = event.get('start', {})
-            if 'dateTime' in start:
-                start_time = parser.parse(start['dateTime'])
-                formatted_time = start_time.strftime("%A, %B %d at %I:%M %p")
+            start = event.start
+            if start and start.dateTime:
+                formatted_time = start.dateTime.strftime("%A, %B %d at %I:%M %p")
+            elif start and start.date:
+                formatted_time = f"All day on {start.date.strftime('%A, %B %d')}"
             else:
-                formatted_time = start.get('date', 'All day')
+                formatted_time = "Time not specified"
 
             return {
                 "success": True,
-                "message": f"I've successfully cancelled '{event.get('summary', 'your appointment')}' scheduled for {formatted_time}.",
-                "cancelled_event": event.get('summary', 'Untitled Event'),
+                "message": f"I've successfully cancelled '{event.summary or 'your appointment'}' scheduled for {formatted_time}.",
+                "cancelled_event": event.summary or 'Untitled Event',
                 "event_time": formatted_time
             }
         else:
