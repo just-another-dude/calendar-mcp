@@ -106,9 +106,19 @@ def start_local_http_server(port, flow, shutdown_event):
     # Let's return the server instance, shutdown called externally based on event.
     return httpd, handler # Returning the handler *type* here. Need instance capture.
 
-def get_credentials():
-    """Gets valid Google API credentials. Handles loading, refreshing, and the OAuth flow."""
+def get_user_token_file(user_id: str = None) -> str:
+    """Get the token file path for a specific user."""
+    if user_id:
+        # Extract base path and extension from TOKEN_FILE
+        base_path = os.path.splitext(TOKEN_FILE)[0]
+        extension = os.path.splitext(TOKEN_FILE)[1]
+        return f"{base_path}-{user_id}{extension}"
+    return TOKEN_FILE
+
+def get_credentials(user_id: str = None):
+    """Gets valid Google API credentials for a specific user. Handles loading, refreshing, and the OAuth flow."""
     creds = None
+    user_token_file = get_user_token_file(user_id)
 
     # Check if mandatory config is present
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
@@ -116,12 +126,12 @@ def get_credentials():
         raise ValueError("Missing Google OAuth credentials in configuration.")
 
     # --- 1. Load existing tokens ---
-    if os.path.exists(TOKEN_FILE):
+    if os.path.exists(user_token_file):
         try:
-            creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-            logger.info("Loaded credentials from token file.")
+            creds = Credentials.from_authorized_user_file(user_token_file, SCOPES)
+            logger.info(f"Loaded credentials from token file: {user_token_file}")
         except Exception as e:
-            logger.warning(f"Failed to load credentials from {TOKEN_FILE}: {e}. Will attempt re-authentication.")
+            logger.warning(f"Failed to load credentials from {user_token_file}: {e}. Will attempt re-authentication.")
             creds = None # Ensure creds is None if loading failed
 
     # --- 2. Refresh or Initiate Flow ---
@@ -170,11 +180,13 @@ def get_credentials():
             if creds:
                 # Save the credentials for the next run
                 try:
-                    with open(TOKEN_FILE, 'w') as token_file:
+                    # Ensure the directory exists for the token file
+                    os.makedirs(os.path.dirname(user_token_file), exist_ok=True)
+                    with open(user_token_file, 'w') as token_file:
                         token_file.write(creds.to_json())
-                    logger.info(f"Credentials saved successfully to {TOKEN_FILE}")
+                    logger.info(f"Credentials saved successfully to {user_token_file}")
                 except Exception as e:
-                    logger.error(f"Failed to save credentials to {TOKEN_FILE}: {e}")
+                    logger.error(f"Failed to save credentials to {user_token_file}: {e}")
             else:
                 logger.error("OAuth flow using InstalledAppFlow did not result in valid credentials.")
                 return None

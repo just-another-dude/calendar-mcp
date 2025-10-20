@@ -128,23 +128,58 @@ if __name__ == "__main__":
             console_handler.setFormatter(logging.Formatter(LOGGING_CONFIG['formatters']['default']['format']))
             root_logger.addHandler(console_handler)
 
-    # FastAPI/Uvicorn settings
-    host = os.getenv("HOST", "127.0.0.1")
-    port = int(os.getenv("PORT", 8000))
-    reload = os.getenv("RELOAD", "true").lower() == "true"
+    # FastAPI/Uvicorn settings with Railway optimizations
+    # Railway requires binding to 0.0.0.0 and provides PORT via environment
+    is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None
+    is_production = os.getenv("NODE_ENV") == "production" or is_railway
+
+    if is_railway:
+        host = "0.0.0.0"  # Railway requires this
+        port = int(os.getenv("PORT", 8000))  # Railway provides this
+        reload = False  # Disable reload in production
+        logger.info("Railway deployment detected - using production settings")
+    else:
+        host = os.getenv("HOST", "127.0.0.1")
+        port = int(os.getenv("PORT", 8000))
+        reload = os.getenv("RELOAD", "true").lower() == "true" and not is_production
+
+    # Create persistent token directory for Railway
+    if is_railway:
+        tokens_dir = "/app/tokens"
+        os.makedirs(tokens_dir, exist_ok=True)
+        os.environ["TOKEN_FILE_PATH"] = f"{tokens_dir}/saved-tokens.json"
+        logger.info(f"Railway: Set token directory to {tokens_dir}")
 
     logger.info(f"Starting FastAPI server on {host}:{port}...")
+    logger.info(f"Environment: {'Railway' if is_railway else 'Local'}")
     logger.info(f"Reload mode: {'Enabled' if reload else 'Disabled'}")
 
-    # Run Uvicorn, telling it to use our logging config
+    # Run Uvicorn with Railway-optimized settings
     try:
-        uvicorn.run(
-            "src.server:app", 
-            host=host, 
-            port=port, 
-            reload=reload, 
-            log_config=LOGGING_CONFIG # Pass our config dict
-        )
+        uvicorn_config = {
+            "app": "src.server:app",
+            "host": host,
+            "port": port,
+            "reload": reload,
+            "log_config": LOGGING_CONFIG,
+            "access_log": True,
+        }
+
+        # Additional production optimizations for Railway
+        if is_railway:
+            uvicorn_config.update({
+                "workers": 1,  # Railway container limitations
+                "timeout_keep_alive": 120,  # Keep connections alive longer
+                "timeout_graceful_shutdown": 30,  # Graceful shutdown time
+                "limit_max_requests": 1000,  # Restart worker after N requests
+                "limit_concurrency": 100,  # Max concurrent connections
+            })
+            logger.info("Applied Railway production optimizations")
+
+        uvicorn.run(**uvicorn_config)
+
     except Exception as e:
         logger.error(f"Error starting FastAPI server: {e}", exc_info=True)
+        if is_railway:
+            logger.error("Railway deployment failed - check environment variables and configuration")
         sys.exit(1) 
