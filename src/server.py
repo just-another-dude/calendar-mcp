@@ -1057,11 +1057,19 @@ async def mcp_http_transport(
                             logger.warning(f"Invalid token format: {access_token[:20]}...")
                             creds = None
                         else:
-                            # Test the token by creating a service and making a simple call
+                            # Test the token by actually calling Google's API
                             from googleapiclient.discovery import build
                             service = build('calendar', 'v3', credentials=creds)
-                            # Just test that we can create the service - don't make API calls yet
-                            logger.info("Token appears valid - service creation successful")
+
+                            # Make a minimal API call to validate the token
+                            try:
+                                # Try to get the user's calendar list - minimal API call
+                                calendar_list = service.calendarList().list(maxResults=1).execute()
+                                logger.info("Token validation successful - API call succeeded")
+                            except Exception as api_error:
+                                logger.warning(f"Token validation failed - API call failed: {api_error}")
+                                creds = None
+
                     except Exception as token_test_error:
                         logger.warning(f"Token validation failed: {token_test_error}")
                         creds = None
