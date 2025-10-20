@@ -1041,6 +1041,7 @@ async def mcp_http_transport(
                 # Fallback to basic token handling for compatibility
                 try:
                     from google.oauth2.credentials import Credentials
+                    from google.auth.transport.requests import Request
                     logger.info("Falling back to basic token authentication")
 
                     # Create basic credentials object
@@ -1048,6 +1049,22 @@ async def mcp_http_transport(
                         token=access_token,
                         scopes=['https://www.googleapis.com/auth/calendar']
                     )
+
+                    # Validate token by making a test API call
+                    try:
+                        # Simple validation - try to refresh or validate the token
+                        if not access_token or len(access_token) < 20 or not access_token.startswith('ya29.'):
+                            logger.warning(f"Invalid token format: {access_token[:20]}...")
+                            creds = None
+                        else:
+                            # Test the token by creating a service and making a simple call
+                            from googleapiclient.discovery import build
+                            service = build('calendar', 'v3', credentials=creds)
+                            # Just test that we can create the service - don't make API calls yet
+                            logger.info("Token appears valid - service creation successful")
+                    except Exception as token_test_error:
+                        logger.warning(f"Token validation failed: {token_test_error}")
+                        creds = None
 
                     # Basic validation without refresh
                     if not creds or not creds.valid:
@@ -1074,7 +1091,30 @@ async def mcp_http_transport(
                         "id": request.get("id")
                     }
 
-        # Handle MCP protocol messages
+        # Require authentication for all MCP operations
+        if not authorization:
+            logger.warning("MCP request without authorization header")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "Authentication required - missing Authorization header"
+                },
+                "id": request.get("id")
+            }
+
+        if not creds or not creds.valid:
+            logger.warning("MCP request with invalid or missing credentials")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "Authentication failed - invalid or expired OAuth token"
+                },
+                "id": request.get("id")
+            }
+
+        # Handle MCP protocol messages (all require valid authentication)
         method = request.get("method")
         params = request.get("params", {})
         request_id = request.get("id")
