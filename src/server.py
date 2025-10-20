@@ -258,8 +258,12 @@ def get_api_key():
 @app.get("/health", tags=["Management"], operation_id="health_check")
 def health_check():
     """Basic health check endpoint."""
-    auth_status = "authenticated" if global_credentials and global_credentials.valid else "authentication_failed_or_pending"
-    return {"status": "ok", "authentication": auth_status}
+    return {
+        "status": "ok",
+        "authentication": "multi_user_oauth_enabled",
+        "server_version": "1.0.0",
+        "mcp_protocol": "2024-11-05"
+    }
 
 # --- CalendarList Endpoints ---
 @app.get(
