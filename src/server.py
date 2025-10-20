@@ -265,6 +265,27 @@ def health_check():
         "mcp_protocol": "2024-11-05"
     }
 
+@app.get("/token-status", tags=["Management"], operation_id="token_status")
+def token_status():
+    """Check production token status for OpenAI Platform integration."""
+    try:
+        from .token_manager import token_manager
+        status = token_manager.get_token_status()
+
+        return {
+            "status": "ok",
+            "token_manager": "enabled",
+            "token_info": status,
+            "server_version": "1.0.0"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "token_manager": "disabled",
+            "error": str(e),
+            "message": "Token manager not available - using fallback authentication"
+        }
+
 # --- CalendarList Endpoints ---
 @app.get(
     "/calendars",
@@ -988,56 +1009,70 @@ async def mcp_http_transport(
     Handles MCP protocol messages over HTTP as required by OpenAI Responses API.
     """
     try:
-        # Extract user credentials from OAuth token
+        # Extract user credentials from OAuth token with production token management
         creds = None
         if authorization:
             # Remove "Bearer " prefix if present
             access_token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
 
-            # Create Google credentials directly from OAuth access token
+            # Use production token manager for automatic refresh
             try:
-                from google.oauth2.credentials import Credentials
+                from .token_manager import get_production_credentials
 
-                # Create credentials object with the OAuth access token
-                creds = Credentials(
-                    token=access_token,
-                    # Note: These are the minimal required scopes for calendar access
-                    # The token should already have been issued with appropriate scopes
-                    scopes=['https://www.googleapis.com/auth/calendar']
-                )
-
-                # Validate that the token works by making a simple test request
-                from google.auth.transport.requests import Request
-                if creds and not creds.valid:
-                    try:
-                        creds.refresh(Request())
-                    except Exception:
-                        # If refresh fails, the token might be invalid
-                        creds = None
+                # Get credentials with automatic refresh capability
+                creds = get_production_credentials(access_token)
 
                 if not creds or not creds.valid:
-                    logger.warning("OAuth token validation failed")
+                    logger.warning("OAuth token validation failed or token refresh failed")
                     return {
                         "jsonrpc": "2.0",
                         "error": {
                             "code": -32001,
-                            "message": "Authentication failed - invalid or expired OAuth token"
+                            "message": "Authentication failed - invalid or expired OAuth token. Token may need manual refresh."
                         },
                         "id": request.get("id")
                     }
 
-                logger.info("Successfully authenticated with OAuth token for MCP request")
+                logger.info("Successfully authenticated with OAuth token for MCP request (production mode)")
 
             except Exception as e:
-                logger.error(f"OAuth token processing error: {e}")
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32001,
-                        "message": f"Authentication failed - OAuth token error: {str(e)}"
-                    },
-                    "id": request.get("id")
-                }
+                logger.error(f"Production OAuth token processing error: {e}")
+
+                # Fallback to basic token handling for compatibility
+                try:
+                    from google.oauth2.credentials import Credentials
+                    logger.info("Falling back to basic token authentication")
+
+                    # Create basic credentials object
+                    creds = Credentials(
+                        token=access_token,
+                        scopes=['https://www.googleapis.com/auth/calendar']
+                    )
+
+                    # Basic validation without refresh
+                    if not creds or not creds.valid:
+                        logger.warning("Basic OAuth token validation failed")
+                        return {
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32001,
+                                "message": "Authentication failed - invalid OAuth token (basic mode)"
+                            },
+                            "id": request.get("id")
+                        }
+
+                    logger.info("Successfully authenticated with basic OAuth token")
+
+                except Exception as fallback_error:
+                    logger.error(f"Fallback OAuth token processing also failed: {fallback_error}")
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32001,
+                            "message": f"Authentication failed - OAuth token error: {str(e)}"
+                        },
+                        "id": request.get("id")
+                    }
 
         # Handle MCP protocol messages
         method = request.get("method")
