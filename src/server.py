@@ -75,6 +75,25 @@ user_credentials_cache: Dict[str, Credentials] = {}
 def startup_event():
     """Server startup - credentials will be loaded per user as needed."""
     logger.info("Google Calendar MCP Server starting up...")
+
+    # Validate OAuth environment variables at startup
+    required_oauth_vars = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
+    missing_vars = []
+
+    for var in required_oauth_vars:
+        value = os.getenv(var)
+        if not value:
+            missing_vars.append(var)
+        else:
+            logger.info(f"✅ {var}: Configured (length: {len(value)})")
+
+    if missing_vars:
+        logger.error(f"❌ Missing required OAuth environment variables: {', '.join(missing_vars)}")
+        logger.error("🔧 Please configure these in your Railway dashboard or .env file")
+        logger.warning("⚠️  Calendar operations requiring token refresh may fail")
+    else:
+        logger.info("✅ All required OAuth environment variables are configured")
+
     logger.info("Multi-user OAuth support enabled. Credentials will be loaded per user.")
     logger.info("Use 'X-User-ID' header to specify user identity in requests.")
 
@@ -1038,17 +1057,31 @@ async def mcp_http_transport(
             except Exception as e:
                 logger.error(f"Production OAuth token processing error: {e}")
 
-                # Fallback to basic token handling for compatibility
+                # Fallback to complete token handling with environment variables
                 try:
                     from google.oauth2.credentials import Credentials
                     from google.auth.transport.requests import Request
-                    logger.info("Falling back to basic token authentication")
+                    logger.info("Falling back to environment-based token authentication")
 
-                    # Create basic credentials object
+                    # Get OAuth credentials from environment variables
+                    client_id = os.getenv('GOOGLE_CLIENT_ID')
+                    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+
+                    if not client_id or not client_secret:
+                        logger.error("Missing required OAuth environment variables: GOOGLE_CLIENT_ID and/or GOOGLE_CLIENT_SECRET")
+                        raise Exception("OAuth environment variables not configured")
+
+                    # Create complete credentials object with all required fields for refresh
                     creds = Credentials(
                         token=access_token,
+                        refresh_token=None,  # Will be None for fresh tokens, but field is present
+                        token_uri="https://oauth2.googleapis.com/token",
+                        client_id=client_id,
+                        client_secret=client_secret,
                         scopes=['https://www.googleapis.com/auth/calendar']
                     )
+
+                    logger.info("Created complete credentials with OAuth environment variables")
 
                     # Validate token by making a test API call
                     try:

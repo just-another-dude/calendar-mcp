@@ -50,8 +50,24 @@ class TokenManager:
 
         if not token_info:
             logger.warning("No token info available for refresh")
-            # Create basic credentials without refresh capability
-            return Credentials(token=access_token)
+            # Use environment variables to create complete credentials even without stored token info
+            client_id = os.getenv('GOOGLE_CLIENT_ID')
+            client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+
+            if client_id and client_secret:
+                logger.info("Creating credentials using environment variables")
+                return Credentials(
+                    token=access_token,
+                    refresh_token=None,  # Will be None for fresh tokens, but field is present
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    scopes=['https://www.googleapis.com/auth/calendar']
+                )
+            else:
+                logger.error("No token info and missing OAuth environment variables")
+                # Create basic credentials without refresh capability as last resort
+                return Credentials(token=access_token)
 
         try:
             # Create credentials with refresh capability
