@@ -126,11 +126,6 @@ def find_events(
         events_response = EventsResponse(**events_result)
         return events_response
 
-    except RefreshError as refresh_error:
-        logger.error(f"OAuth token refresh failed while finding events: {refresh_error}")
-        logger.warning("This usually means the access token has expired and cannot be refreshed automatically")
-        logger.info("Suggestion: The client should request a new access token from the OAuth provider")
-        return None
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error while finding events: {auth_error}")
         logger.warning("This indicates a problem with the OAuth credentials or network transport")
@@ -144,6 +139,9 @@ def find_events(
         except Exception:
             logger.error(f"Google API error details (find_events): {error.resp.status} - Could not decode error content.")
         return None
+    except RefreshError:
+        # Let RefreshError bubble up to server.py for service account fallback
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred while finding events: {e}", exc_info=True)
         return None
@@ -249,11 +247,6 @@ def create_event(
         parsed_event = GoogleCalendarEvent(**created_event)
         return parsed_event
 
-    except RefreshError as refresh_error:
-        logger.error(f"OAuth token refresh failed while creating event: {refresh_error}")
-        logger.warning("This usually means the access token has expired and cannot be refreshed automatically")
-        logger.info("Suggestion: The client should request a new access token from the OAuth provider")
-        return None
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error while creating event: {auth_error}")
         logger.warning("This indicates a problem with the OAuth credentials or network transport")
@@ -267,6 +260,9 @@ def create_event(
             pass # Keep default message if decoding fails
         logger.error(f"Google API error while creating event: {error.resp.status} - {error_content}", exc_info=True)
         return None
+    except RefreshError:
+        # Let RefreshError bubble up to server.py for service account fallback
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred while creating event: {e}", exc_info=True)
         return None
@@ -307,11 +303,6 @@ def quick_add_event(
         parsed_event = GoogleCalendarEvent(**created_event)
         return parsed_event
 
-    except RefreshError as refresh_error:
-        logger.error(f"OAuth token refresh failed during quick add: {refresh_error}")
-        logger.warning("This usually means the access token has expired and cannot be refreshed automatically")
-        logger.info("Suggestion: The client should request a new access token from the OAuth provider")
-        return None
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error during quick add: {auth_error}")
         logger.warning("This indicates a problem with the OAuth credentials or network transport")
@@ -325,6 +316,9 @@ def quick_add_event(
         except Exception:
             logger.error(f"Google API error details (quick_add): {error.resp.status} - Could not decode error content.")
         return None
+    except RefreshError:
+        # Let RefreshError bubble up to server.py for service account fallback
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred during quick add: {e}", exc_info=True)
         return None
@@ -645,6 +639,9 @@ def find_calendars(
         except Exception:
             logger.error(f"Google API error details (find_calendars): {error.resp.status} - Could not decode error content.")
         return None
+    except RefreshError:
+        # Let RefreshError bubble up to server.py for service account fallback
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred while fetching calendar list: {e}", exc_info=True)
         return None
@@ -839,11 +836,6 @@ def find_availability(
         logger.info(f"Successfully retrieved free/busy information for {len(processed_results)} calendars.")
         return processed_results
 
-    except RefreshError as refresh_error:
-        logger.error(f"OAuth token refresh failed during free/busy query: {refresh_error}")
-        logger.warning("This usually means the access token has expired and cannot be refreshed automatically")
-        logger.info("Suggestion: The client should request a new access token from the OAuth provider")
-        return None
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error during free/busy query: {auth_error}")
         logger.warning("This indicates a problem with the OAuth credentials or network transport")
@@ -858,6 +850,9 @@ def find_availability(
             pass
         logger.error(f"Google API error occurred during free/busy query: {error.resp.status} - {error_content}", exc_info=True)
         return None
+    except RefreshError:
+        # Let RefreshError bubble up to server.py for service account fallback
+        raise
     except Exception as e:
         logger.error(f"An unexpected error occurred during free/busy query: {e}", exc_info=True)
         return None

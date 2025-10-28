@@ -31,6 +31,7 @@ try:
     # Use absolute imports for consistency
     from src.auth import get_credentials
     import src.calendar_actions as calendar_actions
+    from src.service_account_auth import get_service_account_credentials, validate_service_account
     from src.models import (
         GoogleCalendarEvent,
         EventsResponse,
@@ -94,6 +95,31 @@ def startup_event():
         logger.warning("⚠️  Calendar operations requiring token refresh may fail")
     else:
         logger.info("✅ All required OAuth environment variables are configured")
+
+    # Validate service account setup at startup
+    logger.info("🔍 Validating service account authentication setup...")
+    service_account_status = validate_service_account()
+
+    if service_account_status["service_account_available"]:
+        logger.info("✅ Service account credentials available")
+        if service_account_status["credentials_valid"]:
+            logger.info("✅ Service account credentials are valid")
+            if service_account_status["calendar_service_working"]:
+                logger.info("✅ Service account Calendar API access confirmed")
+                logger.info("🚀 Service account fallback authentication ready")
+            else:
+                logger.warning("⚠️  Service account Calendar API test failed")
+                if "service_error" in service_account_status["details"]:
+                    logger.warning(f"   Error: {service_account_status['details']['service_error']}")
+        else:
+            logger.warning("⚠️  Service account credentials invalid")
+            if "refresh_error" in service_account_status["details"]:
+                logger.warning(f"   Refresh error: {service_account_status['details']['refresh_error']}")
+    else:
+        logger.warning("⚠️  Service account authentication not configured")
+        logger.info("   OAuth will be the only authentication method")
+        if "error" in service_account_status["details"]:
+            logger.warning(f"   Details: {service_account_status['details']['error']}")
 
     logger.info("Multi-user OAuth support enabled. Credentials will be loaded per user.")
     logger.info("Use 'X-User-ID' header to specify user identity in requests.")
@@ -1690,18 +1716,47 @@ async def handle_mcp_tool_call(request_id, params, creds):
     except RefreshError as refresh_error:
         logger.error(f"OAuth token refresh failed during MCP tool call: {refresh_error}")
         logger.warning("Access token has expired and cannot be refreshed automatically")
-        return {
-            "jsonrpc": "2.0",
-            "error": {
-                "code": -32001,
-                "message": "OAuth token expired. Please request a new access token from your OAuth provider.",
-                "data": {
-                    "error_type": "oauth_refresh_failed",
-                    "suggestion": "The client should request a new access token"
+
+        # Phase 2: Try service account authentication as fallback
+        logger.info("🔄 Attempting service account fallback authentication...")
+        service_account_creds = get_service_account_credentials()
+
+        if service_account_creds and service_account_creds.valid:
+            logger.info("✅ Service account fallback successful, retrying MCP tool call...")
+            try:
+                # Retry the tool call with service account credentials
+                return await handle_mcp_tool_call(request_id, params, service_account_creds)
+            except Exception as fallback_error:
+                logger.error(f"❌ Service account fallback failed: {fallback_error}")
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32001,
+                        "message": "Both OAuth and service account authentication failed.",
+                        "data": {
+                            "error_type": "authentication_failed",
+                            "oauth_error": str(refresh_error),
+                            "service_account_error": str(fallback_error),
+                            "suggestion": "Check OAuth token validity or service account configuration"
+                        }
+                    },
+                    "id": request_id
                 }
-            },
-            "id": request_id
-        }
+        else:
+            logger.warning("❌ Service account fallback not available or invalid")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32001,
+                    "message": "OAuth token expired. Please request a new access token from your OAuth provider.",
+                    "data": {
+                        "error_type": "oauth_refresh_failed",
+                        "suggestion": "The client should request a new access token",
+                        "service_account_available": bool(service_account_creds)
+                    }
+                },
+                "id": request_id
+            }
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error during MCP tool call: {auth_error}")
         return {
