@@ -9,4 +9,5 @@ email-validator
 requests
 python-dotenv
 cryptography
-mcp 
+packaging
+mcp
