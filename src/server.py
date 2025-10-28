@@ -24,6 +24,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError, DefaultCredentialsError, TransportError
 
 # Import functions and models directly using absolute imports
 try:
@@ -1034,6 +1035,20 @@ async def mcp_http_transport(
             # Remove "Bearer " prefix if present
             access_token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
 
+            # Token validation and diagnostic logging
+            logger.info("🔍 OAuth Token Diagnostic Information:")
+            logger.info(f"  📋 Token length: {len(access_token)} characters")
+            logger.info(f"  🔗 Token prefix: {access_token[:15]}..." if len(access_token) > 15 else f"  🔗 Full token: {access_token}")
+            logger.info(f"  ✅ Expected prefix (ya29.): {'✅' if access_token.startswith('ya29.') else '❌'}")
+
+            # Basic format validation
+            if not access_token.startswith('ya29.'):
+                logger.warning("⚠️  Token does not have expected Google OAuth format (ya29.)")
+            if len(access_token) < 50:
+                logger.warning("⚠️  Token appears unusually short for Google OAuth token")
+            if len(access_token) > 2000:
+                logger.warning("⚠️  Token appears unusually long")
+
             # Use production token manager for automatic refresh
             try:
                 from .token_manager import get_production_credentials
@@ -1053,6 +1068,28 @@ async def mcp_http_transport(
                     }
 
                 logger.info("Successfully authenticated with OAuth token for MCP request (production mode)")
+
+                # Comprehensive credentials diagnostic logging
+                logger.info("🔍 Credentials Diagnostic Information:")
+                logger.info(f"  📊 Credentials object type: {type(creds).__name__}")
+                logger.info(f"  ✅ Credentials valid: {'✅' if creds.valid else '❌'}")
+                logger.info(f"  🗓️ Token expiry: {creds.expiry if hasattr(creds, 'expiry') and creds.expiry else 'Not available'}")
+                logger.info(f"  🔑 Has refresh_token: {'✅' if hasattr(creds, 'refresh_token') and creds.refresh_token else '❌'}")
+                logger.info(f"  🔐 Has client_id: {'✅' if hasattr(creds, 'client_id') and creds.client_id else '❌'}")
+                logger.info(f"  🔒 Has client_secret: {'✅' if hasattr(creds, 'client_secret') and creds.client_secret else '❌'}")
+                logger.info(f"  🌐 Has token_uri: {'✅' if hasattr(creds, 'token_uri') and creds.token_uri else '❌'}")
+                logger.info(f"  📋 Token scopes: {creds.scopes if hasattr(creds, 'scopes') else 'Not available'}")
+
+                # OAuth refresh capability analysis
+                refresh_capable = (
+                    hasattr(creds, 'refresh_token') and creds.refresh_token and
+                    hasattr(creds, 'client_id') and creds.client_id and
+                    hasattr(creds, 'client_secret') and creds.client_secret and
+                    hasattr(creds, 'token_uri') and creds.token_uri
+                )
+                logger.info(f"  🔄 OAuth refresh capable: {'✅' if refresh_capable else '❌'}")
+                if not refresh_capable:
+                    logger.warning("⚠️  Credentials missing fields required for automatic token refresh")
 
             except Exception as e:
                 logger.error(f"Production OAuth token processing error: {e}")
@@ -1650,6 +1687,35 @@ async def handle_mcp_tool_call(request_id, params, creds):
             "id": request_id
         }
 
+    except RefreshError as refresh_error:
+        logger.error(f"OAuth token refresh failed during MCP tool call: {refresh_error}")
+        logger.warning("Access token has expired and cannot be refreshed automatically")
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32001,
+                "message": "OAuth token expired. Please request a new access token from your OAuth provider.",
+                "data": {
+                    "error_type": "oauth_refresh_failed",
+                    "suggestion": "The client should request a new access token"
+                }
+            },
+            "id": request_id
+        }
+    except (DefaultCredentialsError, TransportError) as auth_error:
+        logger.error(f"OAuth authentication error during MCP tool call: {auth_error}")
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32001,
+                "message": "OAuth authentication failed. Please check your credentials.",
+                "data": {
+                    "error_type": "oauth_authentication_failed",
+                    "suggestion": "Verify OAuth configuration and credentials"
+                }
+            },
+            "id": request_id
+        }
     except Exception as e:
         logger.error(f"MCP tool call error: {e}", exc_info=True)
         return {
