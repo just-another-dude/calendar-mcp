@@ -1353,11 +1353,42 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 max_results=arguments.get("max_results", 50)
             )
         elif tool_name == "quick_add_event":
-            result = calendar_actions.create_quick_add_event(
-                credentials=creds,
-                calendar_id=arguments["calendar_id"],
-                text=arguments["text"]
-            )
+            # Quick add event using Google Calendar's natural language parsing
+            try:
+                booking_result = calendar_actions.quick_add_event(
+                    credentials=creds,
+                    calendar_id=arguments["calendar_id"],
+                    text=arguments["text"],
+                    send_notifications=arguments.get("send_notifications", False)
+                )
+
+                if booking_result:
+                    # Format response consistently with voice functions
+                    event_start = booking_result.start
+                    if event_start and event_start.dateTime:
+                        formatted_time = event_start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                    elif event_start and event_start.date:
+                        formatted_time = f"All day on {event_start.date.strftime('%A, %B %d')}"
+                    else:
+                        formatted_time = "the requested time"
+
+                    result = {
+                        "success": True,
+                        "message": f"Event created: {booking_result.summary or 'Appointment'} scheduled for {formatted_time}",
+                        "event_id": booking_result.id,
+                        "event_link": booking_result.html_link
+                    }
+                else:
+                    result = {
+                        "success": False,
+                        "error": "Failed to create event via Google Calendar API"
+                    }
+
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "error": f"Calendar API error: {str(e)}"
+                }
         elif tool_name == "create_event":
             result = calendar_actions.create_event(
                 credentials=creds,
