@@ -14,7 +14,6 @@ from .models import (
     EventsResponse,
     EventCreateRequest,
     EventDateTime,
-    EventAttendee,
     EventUpdateRequest,
     CalendarListResponse,
     CalendarListEntry

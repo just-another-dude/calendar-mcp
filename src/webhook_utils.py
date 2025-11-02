@@ -1,12 +1,10 @@
 import os
 import hmac
 import hashlib
-import json
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import requests
-from cryptography.fernet import Fernet
 
 # Configure logging
 logger = logging.getLogger(__name__)

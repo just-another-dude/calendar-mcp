@@ -1,6 +1,6 @@
 import datetime # Import the module itself
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 # from datetime import datetime, date # Keep original import commented for reference
 
 # Based on Google Calendar API v3 Event resource documentation:

@@ -6,7 +6,7 @@ Handles automatic OAuth token refresh for production use.
 import os
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request

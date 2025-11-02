@@ -2,14 +2,17 @@ import logging
 import uvicorn
 import sys
 import os
-from fastapi import FastAPI, HTTPException
-from datetime import datetime, date, time
+
+# FastAPI imports moved below path setup
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 import json
-from dateutil import parser # Import dateutil parser
+from dateutil import parser  # Import dateutil parser
 
 # Configure logging first to capture any startup errors
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Add the parent directory to the path to ensure imports work in all environments
@@ -19,11 +22,8 @@ if parent_dir not in sys.path:
     logger.info(f"Added {parent_dir} to Python path")
 
 from fastapi import FastAPI, HTTPException, Body, Query, Path, Depends, Header
-from fastapi.routing import APIRoute
-from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError, DefaultCredentialsError, TransportError
 
 # Import functions and models directly using absolute imports
@@ -31,7 +31,10 @@ try:
     # Use absolute imports for consistency
     from src.auth import get_credentials
     import src.calendar_actions as calendar_actions
-    from src.service_account_auth import get_service_account_credentials, validate_service_account
+    from src.service_account_auth import (
+        get_service_account_credentials,
+        validate_service_account,
+    )
     from src.models import (
         GoogleCalendarEvent,
         EventsResponse,
@@ -42,21 +45,35 @@ try:
         CalendarListResponse,
         CalendarListEntry,
         # New models for advanced actions
-        CheckAttendeeStatusRequest, CheckAttendeeStatusResponse,
-        FreeBusyRequest, FreeBusyResponse,
+        CheckAttendeeStatusRequest,
+        CheckAttendeeStatusResponse,
+        FreeBusyRequest,
+        FreeBusyResponse,
         ScheduleMutualRequest,
-        ProjectRecurringRequest, ProjectRecurringResponse, ProjectedEventOccurrenceModel,
-        AnalyzeBusynessRequest, AnalyzeBusynessResponse, DailyBusynessStats,
+        ProjectRecurringRequest,
+        ProjectRecurringResponse,
+        ProjectedEventOccurrenceModel,
+        AnalyzeBusynessRequest,
+        AnalyzeBusynessResponse,
+        DailyBusynessStats,
         # Specific models needed for freeBusy conversion
-        CalendarBusyInfo, TimePeriod, FreeBusyError
+        CalendarBusyInfo,
+        TimePeriod,
+        FreeBusyError,
     )
     from src.analysis import ProjectedEventOccurrence
     from src.webhook_utils import (
         webhook_validator,
         webhook_processor,
         subscription_manager,
-        OpenAIWebhookForwarder
+        OpenAIWebhookForwarder,
     )
+    from src.mcp_utils import (
+        mcp_params_to_event_create_request,
+        mcp_params_to_event_update_request,
+        validate_mcp_create_params,
+    )
+
     logger.info("Successfully imported modules")
 except ImportError as e:
     logger.error(f"Could not import modules: {e}")
@@ -65,7 +82,7 @@ except ImportError as e:
 app = FastAPI(
     title="Google Calendar MCP Server",
     description="MCP server for interacting with Google Calendar API.",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 # --- Global State / Initialization ---
@@ -73,13 +90,14 @@ app = FastAPI(
 # Format: {user_id: credentials}
 user_credentials_cache: Dict[str, Credentials] = {}
 
+
 @app.on_event("startup")
 def startup_event():
     """Server startup - credentials will be loaded per user as needed."""
     logger.info("Google Calendar MCP Server starting up...")
 
     # Validate OAuth environment variables at startup
-    required_oauth_vars = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
+    required_oauth_vars = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
     missing_vars = []
 
     for var in required_oauth_vars:
@@ -90,7 +108,9 @@ def startup_event():
             logger.info(f"✅ {var}: Configured (length: {len(value)})")
 
     if missing_vars:
-        logger.error(f"❌ Missing required OAuth environment variables: {', '.join(missing_vars)}")
+        logger.error(
+            f"❌ Missing required OAuth environment variables: {', '.join(missing_vars)}"
+        )
         logger.error("🔧 Please configure these in your Railway dashboard or .env file")
         logger.warning("⚠️  Calendar operations requiring token refresh may fail")
     else:
@@ -110,19 +130,26 @@ def startup_event():
             else:
                 logger.warning("⚠️  Service account Calendar API test failed")
                 if "service_error" in service_account_status["details"]:
-                    logger.warning(f"   Error: {service_account_status['details']['service_error']}")
+                    logger.warning(
+                        f"   Error: {service_account_status['details']['service_error']}"
+                    )
         else:
             logger.warning("⚠️  Service account credentials invalid")
             if "refresh_error" in service_account_status["details"]:
-                logger.warning(f"   Refresh error: {service_account_status['details']['refresh_error']}")
+                logger.warning(
+                    f"   Refresh error: {service_account_status['details']['refresh_error']}"
+                )
     else:
         logger.warning("⚠️  Service account authentication not configured")
         logger.info("   OAuth will be the only authentication method")
         if "error" in service_account_status["details"]:
             logger.warning(f"   Details: {service_account_status['details']['error']}")
 
-    logger.info("Multi-user OAuth support enabled. Credentials will be loaded per user.")
+    logger.info(
+        "Multi-user OAuth support enabled. Credentials will be loaded per user."
+    )
     logger.info("Use 'X-User-ID' header to specify user identity in requests.")
+
 
 # --- Dependency for Credentials ---
 def get_user_credentials(user_id: str = Header(None, alias="X-User-ID")) -> Credentials:
@@ -140,14 +167,22 @@ def get_user_credentials(user_id: str = Header(None, alias="X-User-ID")) -> Cred
 
         # Check if valid, try refreshing if expired or invalid
         if not cached_creds.valid:
-            logger.info(f"Credentials for user '{user_id}' are invalid or expired. Attempting refresh...")
+            logger.info(
+                f"Credentials for user '{user_id}' are invalid or expired. Attempting refresh..."
+            )
             try:
+                from google.auth.transport.requests import Request
+
                 cached_creds.refresh(Request())
                 if cached_creds.valid:
-                    logger.info(f"Credentials refreshed successfully for user '{user_id}'")
+                    logger.info(
+                        f"Credentials refreshed successfully for user '{user_id}'"
+                    )
                     return cached_creds
                 else:
-                    logger.warning(f"Credential refresh succeeded but credentials still invalid for user '{user_id}'")
+                    logger.warning(
+                        f"Credential refresh succeeded but credentials still invalid for user '{user_id}'"
+                    )
                     # Remove from cache and fall through to re-fetch
                     del user_credentials_cache[user_id]
             except Exception as e:
@@ -165,22 +200,28 @@ def get_user_credentials(user_id: str = Header(None, alias="X-User-ID")) -> Cred
         if not new_creds or not new_creds.valid:
             raise HTTPException(
                 status_code=401,
-                detail=f"Unable to obtain valid Google API credentials for user '{user_id}'. Please complete OAuth flow."
+                detail=f"Unable to obtain valid Google API credentials for user '{user_id}'. Please complete OAuth flow.",
             )
 
         # Cache the new credentials
         user_credentials_cache[user_id] = new_creds
-        logger.info(f"Successfully obtained and cached credentials for user '{user_id}'")
+        logger.info(
+            f"Successfully obtained and cached credentials for user '{user_id}'"
+        )
         return new_creds
 
     except Exception as e:
-        logger.error(f"Failed to fetch credentials for user '{user_id}': {e}", exc_info=True)
+        logger.error(
+            f"Failed to fetch credentials for user '{user_id}': {e}", exc_info=True
+        )
         raise HTTPException(
             status_code=401,
-            detail=f"Google API credentials unavailable for user '{user_id}': {e}"
+            detail=f"Google API credentials unavailable for user '{user_id}': {e}",
         )
 
-# --- MCP Offerings Endpoint --- 
+
+# --- MCP Offerings Endpoint ---
+
 
 def clean_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively replace $ref with the actual schema definition name."""
@@ -188,12 +229,16 @@ def clean_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
         if "$ref" in schema:
             ref_path = schema["$ref"]
             # Extract the schema name (e.g., '#/components/schemas/MyModel' -> 'MyModel')
-            schema_name = ref_path.split('/')[-1]
-            return {"type": "schema_ref", "schema_name": schema_name} # Replace ref with a marker
+            schema_name = ref_path.split("/")[-1]
+            return {
+                "type": "schema_ref",
+                "schema_name": schema_name,
+            }  # Replace ref with a marker
         return {k: clean_schema_refs(v) for k, v in schema.items()}
     elif isinstance(schema, list):
         return [clean_schema_refs(item) for item in schema]
     return schema
+
 
 def map_openapi_type_to_mcp(openapi_type: str, format: Optional[str] = None) -> str:
     """Maps OpenAPI types to basic MCP types."""
@@ -210,14 +255,15 @@ def map_openapi_type_to_mcp(openapi_type: str, format: Optional[str] = None) -> 
     elif openapi_type == "integer":
         return "integer"
     elif openapi_type == "number":
-        return "number" # Or float?
+        return "number"  # Or float?
     elif openapi_type == "boolean":
         return "boolean"
     elif openapi_type == "array":
         return "array"
     elif openapi_type == "object":
         return "object"
-    return "any" # Default fallback
+    return "any"  # Default fallback
+
 
 @app.get("/services/offerings", tags=["MCP"], operation_id="list_mcp_offerings")
 def list_mcp_offerings():
@@ -228,28 +274,40 @@ def list_mcp_offerings():
 
     for path, path_item in openapi_schema.get("paths", {}).items():
         # Skip MCP, docs, health endpoints
-        if path.startswith("/services") or path in ["/docs", "/redoc", "/openapi.json", "/health"]:
+        if path.startswith("/services") or path in [
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/health",
+        ]:
             continue
 
         for method, operation in path_item.items():
             if method not in ["get", "post", "patch", "delete", "put"]:
-                continue # Skip non-standard methods like parameters
+                continue  # Skip non-standard methods like parameters
 
-            tool_id = operation.get("operationId") or f"{method}_{path.replace('/', '_').strip('_')}"
+            tool_id = (
+                operation.get("operationId")
+                or f"{method}_{path.replace('/', '_').strip('_')}"
+            )
             summary = operation.get("summary", "No summary available")
-            description = operation.get("description") or summary # Use summary if no description
+            description = (
+                operation.get("description") or summary
+            )  # Use summary if no description
 
             parameters = []
 
             # Process path and query parameters
             for param in operation.get("parameters", []):
                 param_schema = param.get("schema", {})
-                parameters.append({
-                    "name": param.get("name"),
-                    "description": param.get("description", ""),
-                    "type": map_openapi_type_to_mcp(param_schema.get("type")),
-                    "required": param.get("required", False)
-                })
+                parameters.append(
+                    {
+                        "name": param.get("name"),
+                        "description": param.get("description", ""),
+                        "type": map_openapi_type_to_mcp(param_schema.get("type")),
+                        "required": param.get("required", False),
+                    }
+                )
 
             # Process request body parameters
             request_body = operation.get("requestBody")
@@ -259,46 +317,66 @@ def list_mcp_offerings():
                 json_content = content.get("application/json", {})
                 body_schema_ref = json_content.get("schema", {}).get("$ref")
                 if body_schema_ref:
-                    schema_name = body_schema_ref.split('/')[-1]
+                    schema_name = body_schema_ref.split("/")[-1]
                     body_schema = schemas.get(schema_name, {})
-                    if body_schema.get("type") == "object" and "properties" in body_schema:
-                        for prop_name, prop_details in body_schema.get("properties", {}).items():
+                    if (
+                        body_schema.get("type") == "object"
+                        and "properties" in body_schema
+                    ):
+                        for prop_name, prop_details in body_schema.get(
+                            "properties", {}
+                        ).items():
                             is_required = prop_name in body_schema.get("required", [])
                             # Use alias if present, otherwise the property name
                             field_name = prop_details.get("alias", prop_name)
-                            parameters.append({
-                                "name": field_name,
-                                "description": prop_details.get("description") or prop_details.get("title", ""),
-                                "type": map_openapi_type_to_mcp(prop_details.get("type"), prop_details.get("format")),
-                                "required": is_required
-                                # TODO: Handle nested objects/arrays more thoroughly if needed
-                            })
+                            parameters.append(
+                                {
+                                    "name": field_name,
+                                    "description": prop_details.get("description")
+                                    or prop_details.get("title", ""),
+                                    "type": map_openapi_type_to_mcp(
+                                        prop_details.get("type"),
+                                        prop_details.get("format"),
+                                    ),
+                                    "required": is_required,
+                                    # TODO: Handle nested objects/arrays more thoroughly if needed
+                                }
+                            )
                     else:
-                         # Handle cases where the body is not a direct object schema (e.g., simple type)
-                         parameters.append({
-                            "name": "request_body", # Generic name
-                            "description": request_body.get("description", "Request body"),
-                            "type": map_openapi_type_to_mcp(body_schema.get("type")), # Type of the schema itself
-                            "required": request_body.get("required", True)
-                        })
-
+                        # Handle cases where the body is not a direct object schema (e.g., simple type)
+                        parameters.append(
+                            {
+                                "name": "request_body",  # Generic name
+                                "description": request_body.get(
+                                    "description", "Request body"
+                                ),
+                                "type": map_openapi_type_to_mcp(
+                                    body_schema.get("type")
+                                ),  # Type of the schema itself
+                                "required": request_body.get("required", True),
+                            }
+                        )
 
             # Note: This simple extraction might not capture all nuances of complex parameters.
             # Return type extraction could be added similarly by inspecting 'responses'.
 
-            offerings.append({
-                "offering_id": tool_id,  # Changed from tool_id to offering_id for MCP format
-                "name": summary, # Often used as function name
-                "description": description,
-                "parameters": parameters
-            })
+            offerings.append(
+                {
+                    "offering_id": tool_id,  # Changed from tool_id to offering_id for MCP format
+                    "name": summary,  # Often used as function name
+                    "description": description,
+                    "parameters": parameters,
+                }
+            )
 
     return {"offerings": offerings}
+
 
 @app.get("/services/api_key", tags=["MCP"], operation_id="get_api_key")
 def get_api_key():
     """MCP endpoint to get API key - not required but part of MCP protocol."""
     return {"api_key": "not-required"}
+
 
 # --- Management Endpoint ---
 @app.get("/health", tags=["Management"], operation_id="health_check")
@@ -308,29 +386,32 @@ def health_check():
         "status": "ok",
         "authentication": "multi_user_oauth_enabled",
         "server_version": "1.0.0",
-        "mcp_protocol": "2024-11-05"
+        "mcp_protocol": "2024-11-05",
     }
+
 
 @app.get("/token-status", tags=["Management"], operation_id="token_status")
 def token_status():
     """Check production token status for OpenAI Platform integration."""
     try:
         from .token_manager import token_manager
+
         status = token_manager.get_token_status()
 
         return {
             "status": "ok",
             "token_manager": "enabled",
             "token_info": status,
-            "server_version": "1.0.0"
+            "server_version": "1.0.0",
         }
     except Exception as e:
         return {
             "status": "error",
             "token_manager": "disabled",
             "error": str(e),
-            "message": "Token manager not available - using fallback authentication"
+            "message": "Token manager not available - using fallback authentication",
         }
+
 
 # --- CalendarList Endpoints ---
 @app.get(
@@ -338,44 +419,62 @@ def token_status():
     response_model=CalendarListResponse,
     tags=["Calendars"],
     summary="List Calendars",
-    operation_id="list_calendars"
+    operation_id="list_calendars",
 )
 def list_calendars_endpoint(
-    min_access_role: Optional[str] = Query(None, description="Minimum access role ('reader', 'writer', 'owner')."),
-    creds: Credentials = Depends(get_user_credentials)
+    min_access_role: Optional[str] = Query(
+        None, description="Minimum access role ('reader', 'writer', 'owner')."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Lists the calendars on the user's calendar list."""
-    logger.info(f"Endpoint 'list_calendars' called. Params: min_access_role='{min_access_role}'")
-    result = calendar_actions.find_calendars(credentials=creds, min_access_role=min_access_role)
+    logger.info(
+        f"Endpoint 'list_calendars' called. Params: min_access_role='{min_access_role}'"
+    )
+    result = calendar_actions.find_calendars(
+        credentials=creds, min_access_role=min_access_role
+    )
     if result is None:
         logger.error("Action 'find_calendars' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to retrieve calendar list from Google API.")
-    logger.info(f"Endpoint 'list_calendars' completed successfully. Returning {len(result.items)} calendars.")
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve calendar list from Google API."
+        )
+    logger.info(
+        f"Endpoint 'list_calendars' completed successfully. Returning {len(result.items)} calendars."
+    )
     return result
+
 
 class CreateCalendarRequest(BaseModel):
     summary: str
 
+
 @app.post(
     "/calendars",
     response_model=CalendarListEntry,
-    status_code=201, # Created
+    status_code=201,  # Created
     tags=["Calendars"],
     summary="Create Calendar",
-    operation_id="create_calendar"
+    operation_id="create_calendar",
 )
 def create_calendar_endpoint(
-    request: CreateCalendarRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    request: CreateCalendarRequest, creds: Credentials = Depends(get_user_credentials)
 ):
     """Creates a new secondary calendar."""
     logger.info(f"Endpoint 'create_calendar' called. Summary: '{request.summary}'")
-    result = calendar_actions.create_calendar(credentials=creds, summary=request.summary)
+    result = calendar_actions.create_calendar(
+        credentials=creds, summary=request.summary
+    )
     if result is None:
-        logger.error(f"Action 'create_calendar' for summary '{request.summary}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to create calendar via Google API.")
+        logger.error(
+            f"Action 'create_calendar' for summary '{request.summary}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to create calendar via Google API."
+        )
     logger.info(f"Endpoint 'create_calendar' completed. Calendar ID: {result.id}")
     return result
+
 
 # --- Events Endpoints ---
 @app.get(
@@ -383,21 +482,40 @@ def create_calendar_endpoint(
     response_model=EventsResponse,
     tags=["Events"],
     summary="Find Events",
-    operation_id="find_events"
+    operation_id="find_events",
 )
 def find_events_endpoint(
-    calendar_id: str = Path(..., description="Calendar identifier (e.g., 'primary', email address, or calendar ID)."),
-    time_min_str: Optional[str] = Query(None, alias="time_min", description="Start time (inclusive, RFC3339 format string)."),
-    time_max_str: Optional[str] = Query(None, alias="time_max", description="End time (exclusive, RFC3339 format string)."),
-    query: Optional[str] = Query(None, alias="q", description="Free text search query."),
-    max_results: int = Query(50, ge=1, le=2500, description="Maximum results per page."),
+    calendar_id: str = Path(
+        ...,
+        description="Calendar identifier (e.g., 'primary', email address, or calendar ID).",
+    ),
+    time_min_str: Optional[str] = Query(
+        None,
+        alias="time_min",
+        description="Start time (inclusive, RFC3339 format string).",
+    ),
+    time_max_str: Optional[str] = Query(
+        None,
+        alias="time_max",
+        description="End time (exclusive, RFC3339 format string).",
+    ),
+    query: Optional[str] = Query(
+        None, alias="q", description="Free text search query."
+    ),
+    max_results: int = Query(
+        50, ge=1, le=2500, description="Maximum results per page."
+    ),
     single_events: bool = Query(True, description="Expand recurring events."),
-    order_by: str = Query('startTime', description="Order results by ('startTime' or 'updated')."),
-    creds: Credentials = Depends(get_user_credentials)
+    order_by: str = Query(
+        "startTime", description="Order results by ('startTime' or 'updated')."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Finds events in a specified calendar."""
     logger.info(f"Endpoint 'find_events' called for calendar '{calendar_id}'.")
-    logger.debug(f"Raw Params: time_min_str='{time_min_str}', time_max_str='{time_max_str}', q='{query}', max_results={max_results}, single_events={single_events}, order_by='{order_by}'")
+    logger.debug(
+        f"Raw Params: time_min_str='{time_min_str}', time_max_str='{time_max_str}', q='{query}', max_results={max_results}, single_events={single_events}, order_by='{order_by}'"
+    )
 
     # Manually parse time strings using dateutil.parser
     time_min_dt: Optional[datetime] = None
@@ -409,26 +527,35 @@ def find_events_endpoint(
             time_max_dt = parser.isoparse(time_max_str)
     except ValueError as e:
         logger.error(f"Failed to parse time strings: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid time format provided: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid time format provided: {e}"
+        )
 
     # Now call the action function with parsed datetime objects
     result = calendar_actions.find_events(
         credentials=creds,
         calendar_id=calendar_id,
-        time_min=time_min_dt, # Pass parsed datetime
-        time_max=time_max_dt, # Pass parsed datetime
+        time_min=time_min_dt,  # Pass parsed datetime
+        time_max=time_max_dt,  # Pass parsed datetime
         query=query,
         max_results=max_results,
         single_events=single_events,
-        order_by=order_by
+        order_by=order_by,
     )
     if result is None:
         # Distinguish between API error and just no events?
         # For now, assume None means API error.
-        logger.error(f"Action 'find_events' for calendar '{calendar_id}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to retrieve events from Google API.")
-    logger.info(f"Endpoint 'find_events' for calendar '{calendar_id}' completed. Found {len(result.items)} events.")
+        logger.error(
+            f"Action 'find_events' for calendar '{calendar_id}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve events from Google API."
+        )
+    logger.info(
+        f"Endpoint 'find_events' for calendar '{calendar_id}' completed. Found {len(result.items)} events."
+    )
     return result
+
 
 @app.post(
     "/calendars/{calendar_id}/events",
@@ -436,28 +563,37 @@ def find_events_endpoint(
     status_code=201,
     tags=["Events"],
     summary="Create Detailed Event",
-    operation_id="create_event"
+    operation_id="create_event",
 )
 def create_event_endpoint(
     event_data: EventCreateRequest,
     calendar_id: str = Path(..., description="Calendar identifier."),
-    send_notifications: bool = Query(True, description="Send notifications to attendees."),
-    creds: Credentials = Depends(get_user_credentials)
+    send_notifications: bool = Query(
+        True, description="Send notifications to attendees."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Creates a new event with detailed information."""
-    logger.info(f"Endpoint 'create_event' called for calendar '{calendar_id}'. Summary: '{event_data.summary}'")
+    logger.info(
+        f"Endpoint 'create_event' called for calendar '{calendar_id}'. Summary: '{event_data.summary}'"
+    )
     logger.debug(f"Event data: {event_data.dict(exclude_unset=True)}")
     result = calendar_actions.create_event(
         credentials=creds,
         event_data=event_data,
         calendar_id=calendar_id,
-        send_notifications=send_notifications
+        send_notifications=send_notifications,
     )
     if result is None:
-        logger.error(f"Action 'create_event' for calendar '{calendar_id}', summary '{event_data.summary}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to create event via Google API.")
+        logger.error(
+            f"Action 'create_event' for calendar '{calendar_id}', summary '{event_data.summary}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to create event via Google API."
+        )
     logger.info(f"Endpoint 'create_event' completed. Event ID: {result.id}")
     return result
+
 
 @app.post(
     "/calendars/{calendar_id}/events/quickAdd",
@@ -465,161 +601,212 @@ def create_event_endpoint(
     status_code=201,
     tags=["Events"],
     summary="Quick Add Event",
-    operation_id="quick_add_event"
+    operation_id="quick_add_event",
 )
 def quick_add_event_endpoint(
     request_data: QuickAddEventRequest,
     calendar_id: str = Path(..., description="Calendar identifier."),
-    send_notifications: bool = Query(False, description="Send notifications to attendees."),
-    creds: Credentials = Depends(get_user_credentials)
+    send_notifications: bool = Query(
+        False, description="Send notifications to attendees."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Creates an event from a simple text string."""
-    logger.info(f"Endpoint 'quick_add_event' called for calendar '{calendar_id}'. Text: '{request_data.text}'")
+    logger.info(
+        f"Endpoint 'quick_add_event' called for calendar '{calendar_id}'. Text: '{request_data.text}'"
+    )
     result = calendar_actions.quick_add_event(
         credentials=creds,
         text=request_data.text,
         calendar_id=calendar_id,
-        send_notifications=send_notifications
+        send_notifications=send_notifications,
     )
     if result is None:
         # Consider 400 if text was likely unparseable? Hard to know.
-        logger.error(f"Action 'quick_add_event' for calendar '{calendar_id}', text '{request_data.text}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to quick-add event via Google API.")
+        logger.error(
+            f"Action 'quick_add_event' for calendar '{calendar_id}', text '{request_data.text}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to quick-add event via Google API."
+        )
     logger.info(f"Endpoint 'quick_add_event' completed. Event ID: {result.id}")
     return result
+
 
 @app.patch(
     "/calendars/{calendar_id}/events/{event_id}",
     response_model=GoogleCalendarEvent,
     tags=["Events"],
     summary="Update Event (Patch)",
-    operation_id="update_event"
+    operation_id="update_event",
 )
 def update_event_endpoint(
     update_data: EventUpdateRequest,
     calendar_id: str = Path(..., description="Calendar identifier."),
     event_id: str = Path(..., description="Event identifier."),
-    send_notifications: bool = Query(True, description="Send notifications to attendees."),
-    creds: Credentials = Depends(get_user_credentials)
+    send_notifications: bool = Query(
+        True, description="Send notifications to attendees."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Updates specified fields of an existing event."""
-    logger.info(f"Endpoint 'update_event' called for event '{event_id}' in calendar '{calendar_id}'.")
+    logger.info(
+        f"Endpoint 'update_event' called for event '{event_id}' in calendar '{calendar_id}'."
+    )
     logger.debug(f"Update data: {update_data.dict(exclude_unset=True)}")
     result = calendar_actions.update_event(
         credentials=creds,
         event_id=event_id,
         update_data=update_data,
         calendar_id=calendar_id,
-        send_notifications=send_notifications
+        send_notifications=send_notifications,
     )
     if result is None:
         # update_event handles 404 logging, but we might want to return 404 here
         # Need a way for the action function to signal the error type
         # For now, assume 500 for any None return
         # Alternative: Raise custom exceptions from actions
-        logger.error(f"Action 'update_event' for event '{event_id}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail=f"Failed to update event '{event_id}'. Check server logs.")
+        logger.error(
+            f"Action 'update_event' for event '{event_id}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update event '{event_id}'. Check server logs.",
+        )
     logger.info(f"Endpoint 'update_event' completed for event '{event_id}'.")
     return result
 
+
 @app.delete(
     "/calendars/{calendar_id}/events/{event_id}",
-    status_code=204, # No Content
+    status_code=204,  # No Content
     tags=["Events"],
     summary="Delete Event",
-    operation_id="delete_event"
+    operation_id="delete_event",
 )
 def delete_event_endpoint(
     calendar_id: str = Path(..., description="Calendar identifier."),
     event_id: str = Path(..., description="Event identifier."),
-    send_notifications: bool = Query(True, description="Send notifications to attendees."),
-    creds: Credentials = Depends(get_user_credentials)
+    send_notifications: bool = Query(
+        True, description="Send notifications to attendees."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Deletes an event."""
-    logger.info(f"Endpoint 'delete_event' called for event '{event_id}' in calendar '{calendar_id}'.")
+    logger.info(
+        f"Endpoint 'delete_event' called for event '{event_id}' in calendar '{calendar_id}'."
+    )
     success = calendar_actions.delete_event(
         credentials=creds,
         event_id=event_id,
         calendar_id=calendar_id,
-        send_notifications=send_notifications
+        send_notifications=send_notifications,
     )
     if not success:
         # delete_event handles 404 logging
-        logger.error(f"Action 'delete_event' for event '{event_id}' returned False. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail=f"Failed to delete event '{event_id}'. It might not exist or an API error occurred.")
+        logger.error(
+            f"Action 'delete_event' for event '{event_id}' returned False. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete event '{event_id}'. It might not exist or an API error occurred.",
+        )
     # No body needed for 204 response
-    logger.info(f"Endpoint 'delete_event' completed successfully for event '{event_id}'.")
+    logger.info(
+        f"Endpoint 'delete_event' completed successfully for event '{event_id}'."
+    )
     return None
+
 
 @app.post(
     "/calendars/{calendar_id}/events/{event_id}/attendees",
     response_model=GoogleCalendarEvent,
     tags=["Events"],
     summary="Add Attendee(s)",
-    operation_id="add_attendee"
+    operation_id="add_attendee",
 )
 def add_attendee_endpoint(
     request_data: AddAttendeeRequest,
     calendar_id: str = Path(..., description="Calendar identifier."),
     event_id: str = Path(..., description="Event identifier."),
-    send_notifications: bool = Query(True, description="Send notifications to attendees."),
-    creds: Credentials = Depends(get_user_credentials)
+    send_notifications: bool = Query(
+        True, description="Send notifications to attendees."
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Adds one or more attendees to an existing event.
-       Note: This retrieves the event, adds the new emails to the existing list, and patches the event.
+    Note: This retrieves the event, adds the new emails to the existing list, and patches the event.
     """
-    logger.info(f"Endpoint 'add_attendee' called for event '{event_id}'. Attendees: {request_data.attendee_emails}")
+    logger.info(
+        f"Endpoint 'add_attendee' called for event '{event_id}'. Attendees: {request_data.attendee_emails}"
+    )
     result = calendar_actions.add_attendee(
         credentials=creds,
         event_id=event_id,
         attendee_emails=request_data.attendee_emails,
         calendar_id=calendar_id,
-        send_notifications=send_notifications
+        send_notifications=send_notifications,
     )
     if result is None:
-        logger.error(f"Action 'add_attendee' for event '{event_id}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail=f"Failed to add attendees to event '{event_id}'. Check logs.")
+        logger.error(
+            f"Action 'add_attendee' for event '{event_id}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add attendees to event '{event_id}'. Check logs.",
+        )
     logger.info(f"Endpoint 'add_attendee' completed for event '{event_id}'.")
     return result
 
+
 # --- Advanced Scheduling & Analysis Endpoints ---
+
 
 @app.post(
     "/events/check_attendee_status",
     response_model=CheckAttendeeStatusResponse,
     tags=["Advanced Scheduling"],
     summary="Check Attendee Response Status",
-    operation_id="check_attendee_status"
+    operation_id="check_attendee_status",
 )
 def check_attendee_status_endpoint(
     request: CheckAttendeeStatusRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """Checks the response status ('accepted', 'declined', etc.) for attendees of a specific event."""
-    logger.info(f"Endpoint 'check_attendee_status' called for event '{request.event_id}'. Calendar: '{request.calendar_id}'. Attendees: {request.attendee_emails or 'All'}")
+    logger.info(
+        f"Endpoint 'check_attendee_status' called for event '{request.event_id}'. Calendar: '{request.calendar_id}'. Attendees: {request.attendee_emails or 'All'}"
+    )
     status_dict = calendar_actions.check_attendee_status(
         credentials=creds,
         event_id=request.event_id,
         calendar_id=request.calendar_id,
-        attendee_emails=request.attendee_emails
+        attendee_emails=request.attendee_emails,
     )
     if status_dict is None:
         # Could be 404 if event not found, but action logs this.
-        logger.error(f"Action 'check_attendee_status' for event '{request.event_id}' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail=f"Failed to check attendee status for event '{request.event_id}'. Event might not exist or API error.")
-    logger.info(f"Endpoint 'check_attendee_status' completed for event '{request.event_id}'. Found status for {len(status_dict)} attendees.")
+        logger.error(
+            f"Action 'check_attendee_status' for event '{request.event_id}' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check attendee status for event '{request.event_id}'. Event might not exist or API error.",
+        )
+    logger.info(
+        f"Endpoint 'check_attendee_status' completed for event '{request.event_id}'. Found status for {len(status_dict)} attendees."
+    )
     return CheckAttendeeStatusResponse(status_map=status_dict)
+
 
 @app.post(
     "/freeBusy",
     response_model=FreeBusyResponse,
     tags=["Advanced Scheduling"],
     summary="Query Free/Busy Information",
-    operation_id="query_free_busy"
+    operation_id="query_free_busy",
 )
 def query_free_busy_endpoint(
-    request: FreeBusyRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    request: FreeBusyRequest, creds: Credentials = Depends(get_user_credentials)
 ):
     """Queries the free/busy information for a list of calendars over a time period."""
     calendar_ids = [item.id for item in request.items]
@@ -631,54 +818,71 @@ def query_free_busy_endpoint(
         credentials=creds,
         time_min=request.time_min,
         time_max=request.time_max,
-        calendar_ids=calendar_ids
+        calendar_ids=calendar_ids,
     )
 
     if busy_info_dict is None:
         logger.error("Action 'find_availability' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=500, detail="Failed to query free/busy information via Google API.")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to query free/busy information via Google API.",
+        )
 
     # Convert the result from find_availability back into the FreeBusyResponse model structure
     response_calendars: Dict[str, CalendarBusyInfo] = {}
     for cal_id, data in busy_info_dict.items():
         response_calendars[cal_id] = CalendarBusyInfo(
-            busy=[TimePeriod(start=p['start'], end=p['end']) for p in data.get('busy', [])],
-            errors=[FreeBusyError(**err) for err in data.get('errors', [])] # Assuming error dict matches model
+            busy=[
+                TimePeriod(start=p["start"], end=p["end"]) for p in data.get("busy", [])
+            ],
+            errors=[
+                FreeBusyError(**err) for err in data.get("errors", [])
+            ],  # Assuming error dict matches model
         )
 
     # Construct the final response model
     # Note: Google API requires timeMin/timeMax in the request but also returns them in the response
     return FreeBusyResponse(
-        time_min=request.time_min, # Echo request params as per Google API response structure
+        time_min=request.time_min,  # Echo request params as per Google API response structure
         time_max=request.time_max,
-        calendars=response_calendars
+        calendars=response_calendars,
     )
+
 
 @app.post(
     "/schedule_mutual",
     response_model=GoogleCalendarEvent,
-    status_code=201, # Successfully created
+    status_code=201,  # Successfully created
     tags=["Advanced Scheduling"],
     summary="Find Mutual Availability and Schedule",
-    operation_id="schedule_mutual"
+    operation_id="schedule_mutual",
 )
 def schedule_mutual_endpoint(
-    request: ScheduleMutualRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    request: ScheduleMutualRequest, creds: Credentials = Depends(get_user_credentials)
 ):
     """Finds the first available time slot for multiple attendees and schedules the provided event details."""
-    logger.info(f"Endpoint 'schedule_mutual' called. Attendees: {request.attendee_calendar_ids}. Duration: {request.duration_minutes} mins.")
-    logger.debug(f"Time range: {request.time_min} to {request.time_max}. Organizer: {request.organizer_calendar_id}. Event Summary: {request.event_details.summary}")
+    logger.info(
+        f"Endpoint 'schedule_mutual' called. Attendees: {request.attendee_calendar_ids}. Duration: {request.duration_minutes} mins."
+    )
+    logger.debug(
+        f"Time range: {request.time_min} to {request.time_max}. Organizer: {request.organizer_calendar_id}. Event Summary: {request.event_details.summary}"
+    )
     # Parse working hours strings into time objects
     working_hours_start = None
     working_hours_end = None
     try:
         if request.working_hours_start_str:
-            working_hours_start = datetime.strptime(request.working_hours_start_str, '%H:%M').time()
+            working_hours_start = datetime.strptime(
+                request.working_hours_start_str, "%H:%M"
+            ).time()
         if request.working_hours_end_str:
-            working_hours_end = datetime.strptime(request.working_hours_end_str, '%H:%M').time()
+            working_hours_end = datetime.strptime(
+                request.working_hours_end_str, "%H:%M"
+            ).time()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid working hours format. Use HH:MM.")
+        raise HTTPException(
+            status_code=400, detail="Invalid working hours format. Use HH:MM."
+        )
 
     created_event = calendar_actions.find_mutual_availability_and_schedule(
         credentials=creds,
@@ -690,39 +894,50 @@ def schedule_mutual_endpoint(
         organizer_calendar_id=request.organizer_calendar_id,
         working_hours_start=working_hours_start,
         working_hours_end=working_hours_end,
-        send_notifications=request.send_notifications
+        send_notifications=request.send_notifications,
     )
 
     if created_event is None:
         # Could be no slot found, or failed to create event after finding slot.
         # Action function logs the reason.
-        logger.error("Action 'find_mutual_availability_and_schedule' returned None. Raising HTTPException.")
-        raise HTTPException(status_code=409, detail="Could not schedule event. No suitable time slot found or event creation failed.") # 409 Conflict maybe?
-    logger.info(f"Endpoint 'schedule_mutual' completed successfully. Event ID: {created_event.id}")
+        logger.error(
+            "Action 'find_mutual_availability_and_schedule' returned None. Raising HTTPException."
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Could not schedule event. No suitable time slot found or event creation failed.",
+        )  # 409 Conflict maybe?
+    logger.info(
+        f"Endpoint 'schedule_mutual' completed successfully. Event ID: {created_event.id}"
+    )
     return created_event
+
 
 @app.post(
     "/project_recurring",
     response_model=ProjectRecurringResponse,
     tags=["Analysis"],
     summary="Project Recurring Event Occurrences",
-    operation_id="project_recurring"
+    operation_id="project_recurring",
 )
 def project_recurring_endpoint(
-    request: ProjectRecurringRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    request: ProjectRecurringRequest, creds: Credentials = Depends(get_user_credentials)
 ):
     """Finds recurring events and projects their future occurrences within a time window."""
-    logger.info(f"Endpoint 'project_recurring' called. Calendar: '{request.calendar_id}'. Query: '{request.event_query}'")
+    logger.info(
+        f"Endpoint 'project_recurring' called. Calendar: '{request.calendar_id}'. Query: '{request.event_query}'"
+    )
     logger.debug(f"Time range: {request.time_min} to {request.time_max}")
     # Note: calendar_actions.get_projected_recurring_events returns List[ProjectedEventOccurrence]
     # We need to convert this to List[ProjectedEventOccurrenceModel] for the response.
-    occurrences: List[ProjectedEventOccurrence] = calendar_actions.get_projected_recurring_events(
-        credentials=creds,
-        time_min=request.time_min,
-        time_max=request.time_max,
-        calendar_id=request.calendar_id,
-        event_query=request.event_query
+    occurrences: List[ProjectedEventOccurrence] = (
+        calendar_actions.get_projected_recurring_events(
+            credentials=creds,
+            time_min=request.time_min,
+            time_max=request.time_max,
+            calendar_id=request.calendar_id,
+            event_query=request.event_query,
+        )
     )
 
     # Convert ProjectedEventOccurrence (from analysis) to ProjectedEventOccurrenceModel (from models)
@@ -730,51 +945,59 @@ def project_recurring_endpoint(
         ProjectedEventOccurrenceModel(**occ.__dict__) for occ in occurrences
     ]
 
-    logger.info(f"Endpoint 'project_recurring' completed. Found {len(response_occurrences)} projected occurrences.")
+    logger.info(
+        f"Endpoint 'project_recurring' completed. Found {len(response_occurrences)} projected occurrences."
+    )
     return ProjectRecurringResponse(projected_occurrences=response_occurrences)
+
 
 @app.post(
     "/analyze_busyness",
     response_model=AnalyzeBusynessResponse,
     tags=["Analysis"],
     summary="Analyze Daily Event Count and Duration",
-    operation_id="analyze_busyness"
+    operation_id="analyze_busyness",
 )
 def analyze_busyness_endpoint(
-    request: AnalyzeBusynessRequest,
-    creds: Credentials = Depends(get_user_credentials)
+    request: AnalyzeBusynessRequest, creds: Credentials = Depends(get_user_credentials)
 ):
     """Analyzes event count and total duration per day within a specified time window."""
-    logger.info(f"Endpoint 'analyze_busyness' called. Calendar: '{request.calendar_id}'")
+    logger.info(
+        f"Endpoint 'analyze_busyness' called. Calendar: '{request.calendar_id}'"
+    )
     logger.debug(f"Time range: {request.time_min} to {request.time_max}")
     # We need a wrapper in calendar_actions for analyze_busyness from analysis.py
     # Let's add one now.
-    busyness_dict = calendar_actions.get_busyness_analysis( # Call the wrapper function
+    busyness_dict = calendar_actions.get_busyness_analysis(  # Call the wrapper function
         credentials=creds,
         time_min=request.time_min,
         time_max=request.time_max,
-        calendar_id=request.calendar_id
+        calendar_id=request.calendar_id,
     )
 
-    if busyness_dict is None: # Wrapper returns None on error
-         logger.error("Action 'get_busyness_analysis' returned None. Raising HTTPException.")
-         raise HTTPException(status_code=500, detail="Failed to analyze busyness.")
+    if busyness_dict is None:  # Wrapper returns None on error
+        logger.error(
+            "Action 'get_busyness_analysis' returned None. Raising HTTPException."
+        )
+        raise HTTPException(status_code=500, detail="Failed to analyze busyness.")
 
     # Convert date keys to strings (YYYY-MM-DD) for JSON compatibility
     response_data = {
-        dt.strftime('%Y-%m-%d'): DailyBusynessStats(**stats)
+        dt.strftime("%Y-%m-%d"): DailyBusynessStats(**stats)
         for dt, stats in busyness_dict.items()
     }
 
     return AnalyzeBusynessResponse(busyness_by_date=response_data)
 
+
 # --- Webhook Endpoints for Real-time Notifications ---
+
 
 @app.post(
     "/webhooks/calendar/notifications",
     tags=["Webhooks"],
     summary="Receive Google Calendar Push Notifications",
-    operation_id="receive_calendar_webhook"
+    operation_id="receive_calendar_webhook",
 )
 def receive_calendar_webhook(
     request: dict = Body(...),
@@ -783,22 +1006,22 @@ def receive_calendar_webhook(
     x_goog_resource_id: str = Header(None, alias="X-Goog-Resource-ID"),
     x_goog_resource_state: str = Header(None, alias="X-Goog-Resource-State"),
     x_goog_resource_uri: str = Header(None, alias="X-Goog-Resource-URI"),
-    x_goog_message_number: str = Header(None, alias="X-Goog-Message-Number")
+    x_goog_message_number: str = Header(None, alias="X-Goog-Message-Number"),
 ):
     """
     Receives webhook notifications from Google Calendar when events change.
     This endpoint processes real-time updates for calendar events with validation and processing.
     """
-    logger.info(f"Received Google Calendar webhook notification")
+    logger.info("Received Google Calendar webhook notification")
 
     # Validate webhook headers
     headers = {
-        'X-Goog-Channel-ID': x_goog_channel_id,
-        'X-Goog-Channel-Token': x_goog_channel_token,
-        'X-Goog-Resource-ID': x_goog_resource_id,
-        'X-Goog-Resource-State': x_goog_resource_state,
-        'X-Goog-Resource-URI': x_goog_resource_uri,
-        'X-Goog-Message-Number': x_goog_message_number
+        "X-Goog-Channel-ID": x_goog_channel_id,
+        "X-Goog-Channel-Token": x_goog_channel_token,
+        "X-Goog-Resource-ID": x_goog_resource_id,
+        "X-Goog-Resource-State": x_goog_resource_state,
+        "X-Goog-Resource-URI": x_goog_resource_uri,
+        "X-Goog-Message-Number": x_goog_message_number,
     }
 
     # Validate webhook
@@ -815,7 +1038,7 @@ def receive_calendar_webhook(
         "resource_uri": x_goog_resource_uri,
         "message_number": x_goog_message_number,
         "body": request,
-        "received_at": datetime.utcnow().isoformat()
+        "received_at": datetime.utcnow().isoformat(),
     }
 
     # Process webhook with business logic
@@ -826,21 +1049,24 @@ def receive_calendar_webhook(
     return {
         "status": "received",
         "message": "Webhook processed successfully",
-        "processing_result": processing_result
+        "processing_result": processing_result,
     }
+
 
 @app.post(
     "/webhooks/calendar/setup",
     tags=["Webhooks"],
     summary="Setup Google Calendar Push Notifications",
-    operation_id="setup_calendar_webhook"
+    operation_id="setup_calendar_webhook",
 )
 def setup_calendar_webhook(
     calendar_id: str = Body(..., description="Calendar ID to watch"),
     webhook_url: str = Body(..., description="Webhook URL to receive notifications"),
     channel_id: str = Body(None, description="Optional channel ID"),
-    channel_token: str = Body(None, description="Optional channel token for verification"),
-    creds: Credentials = Depends(get_user_credentials)
+    channel_token: str = Body(
+        None, description="Optional channel token for verification"
+    ),
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Sets up Google Calendar push notifications for a specific calendar.
@@ -850,28 +1076,28 @@ def setup_calendar_webhook(
         # Import here to avoid circular imports
         from googleapiclient.discovery import build
 
-        service = build('calendar', 'v3', credentials=creds)
+        service = build("calendar", "v3", credentials=creds)
 
         # Generate channel ID if not provided
         import uuid
+
         if not channel_id:
             channel_id = str(uuid.uuid4())
 
         # Setup the watch request
         watch_request = {
-            'id': channel_id,
-            'type': 'web_hook',
-            'address': webhook_url,
+            "id": channel_id,
+            "type": "web_hook",
+            "address": webhook_url,
         }
 
         if channel_token:
-            watch_request['token'] = channel_token
+            watch_request["token"] = channel_token
 
         # Execute the watch request
-        response = service.events().watch(
-            calendarId=calendar_id,
-            body=watch_request
-        ).execute()
+        response = (
+            service.events().watch(calendarId=calendar_id, body=watch_request).execute()
+        )
 
         logger.info(f"Successfully setup webhook for calendar {calendar_id}")
         logger.info(f"Channel ID: {response.get('id')}")
@@ -880,39 +1106,37 @@ def setup_calendar_webhook(
         # Store subscription in manager
         subscription_data = {
             "calendar_id": calendar_id,
-            "channel_id": response.get('id'),
-            "resource_id": response.get('resourceId'),
+            "channel_id": response.get("id"),
+            "resource_id": response.get("resourceId"),
             "webhook_url": webhook_url,
-            "expiration": response.get('expiration'),
-            "channel_token": channel_token
+            "expiration": response.get("expiration"),
+            "channel_token": channel_token,
         }
-        subscription_manager.store_subscription(response.get('id'), subscription_data)
+        subscription_manager.store_subscription(response.get("id"), subscription_data)
 
         return {
             "status": "success",
-            "channel_id": response.get('id'),
-            "resource_id": response.get('resourceId'),
-            "expiration": response.get('expiration'),
-            "webhook_url": webhook_url
+            "channel_id": response.get("id"),
+            "resource_id": response.get("resourceId"),
+            "expiration": response.get("expiration"),
+            "webhook_url": webhook_url,
         }
 
     except Exception as e:
         logger.error(f"Failed to setup webhook for calendar {calendar_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to setup webhook: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to setup webhook: {e}")
+
 
 @app.post(
     "/webhooks/calendar/stop",
     tags=["Webhooks"],
     summary="Stop Google Calendar Push Notifications",
-    operation_id="stop_calendar_webhook"
+    operation_id="stop_calendar_webhook",
 )
 def stop_calendar_webhook(
     channel_id: str = Body(..., description="Channel ID to stop"),
     resource_id: str = Body(..., description="Resource ID to stop"),
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Stops Google Calendar push notifications for a specific channel.
@@ -921,13 +1145,10 @@ def stop_calendar_webhook(
     try:
         from googleapiclient.discovery import build
 
-        service = build('calendar', 'v3', credentials=creds)
+        service = build("calendar", "v3", credentials=creds)
 
         # Setup the stop request
-        stop_request = {
-            'id': channel_id,
-            'resourceId': resource_id
-        }
+        stop_request = {"id": channel_id, "resourceId": resource_id}
 
         # Execute the stop request
         service.channels().stop(body=stop_request).execute()
@@ -939,21 +1160,19 @@ def stop_calendar_webhook(
 
         return {
             "status": "success",
-            "message": f"Webhook channel {channel_id} stopped successfully"
+            "message": f"Webhook channel {channel_id} stopped successfully",
         }
 
     except Exception as e:
         logger.error(f"Failed to stop webhook channel {channel_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to stop webhook: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to stop webhook: {e}")
+
 
 @app.get(
     "/webhooks/calendar/subscriptions",
     tags=["Webhooks"],
     summary="List Active Webhook Subscriptions",
-    operation_id="list_webhook_subscriptions"
+    operation_id="list_webhook_subscriptions",
 )
 def list_webhook_subscriptions():
     """
@@ -964,25 +1183,25 @@ def list_webhook_subscriptions():
         return {
             "status": "success",
             "subscriptions": subscriptions,
-            "count": len(subscriptions)
+            "count": len(subscriptions),
         }
     except Exception as e:
         logger.error(f"Failed to list webhook subscriptions: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list subscriptions: {e}"
+            status_code=500, detail=f"Failed to list subscriptions: {e}"
         )
+
 
 @app.post(
     "/webhooks/forward/openai",
     tags=["Webhooks"],
     summary="Forward Webhook to OpenAI Platform",
-    operation_id="forward_webhook_openai"
+    operation_id="forward_webhook_openai",
 )
 def forward_webhook_to_openai(
     webhook_data: dict = Body(..., description="Webhook data to forward"),
     openai_endpoint: str = Body(..., description="OpenAI endpoint URL"),
-    openai_api_key: str = Body(None, description="OpenAI API key (optional)")
+    openai_api_key: str = Body(None, description="OpenAI API key (optional)"),
 ):
     """
     Forwards webhook notifications to the OpenAI Platform for voice agent processing.
@@ -999,33 +1218,34 @@ def forward_webhook_to_openai(
                 "status": "success",
                 "message": "Webhook forwarded to OpenAI successfully",
                 "openai_response_status": result.get("openai_response_status"),
-                "attempt": result.get("attempt")
+                "attempt": result.get("attempt"),
             }
         else:
             logger.error(f"Failed to forward webhook: {result}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to forward webhook: {result.get('error')}"
+                detail=f"Failed to forward webhook: {result.get('error')}",
             )
 
     except Exception as e:
         logger.error(f"Failed to forward webhook to OpenAI: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to forward webhook to OpenAI: {e}"
+            status_code=500, detail=f"Failed to forward webhook to OpenAI: {e}"
         )
 
+
 # --- HTTP/SSE MCP Transport for OpenAI Integration ---
+
 
 @app.get(
     "/mcp",
     tags=["MCP"],
     summary="MCP Server-Sent Events Endpoint",
-    operation_id="mcp_sse_transport"
+    operation_id="mcp_sse_transport",
 )
 async def mcp_sse_transport(
     authorization: str = Header(None, alias="Authorization"),
-    user_id: str = Header(None, alias="X-User-ID")
+    user_id: str = Header(None, alias="X-User-ID"),
 ):
     """
     MCP Server-Sent Events transport endpoint for OpenAI integration.
@@ -1035,20 +1255,21 @@ async def mcp_sse_transport(
 
     async def mcp_stream():
         # SSE connection for MCP protocol
-        yield "data: {\"jsonrpc\": \"2.0\", \"method\": \"initialize\", \"params\": {\"protocolVersion\": \"2024-11-05\", \"capabilities\": {\"tools\": {}}}}\n\n"
+        yield 'data: {"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}}}\n\n'
 
     return StreamingResponse(mcp_stream(), media_type="text/plain")
+
 
 @app.post(
     "/mcp",
     tags=["MCP"],
     summary="MCP HTTP Transport Endpoint",
-    operation_id="mcp_http_transport"
+    operation_id="mcp_http_transport",
 )
 async def mcp_http_transport(
     request: dict = Body(...),
     authorization: str = Header(None, alias="Authorization"),
-    user_id: str = Header(None, alias="X-User-ID")
+    user_id: str = Header(None, alias="X-User-ID"),
 ):
     """
     MCP HTTP transport endpoint for OpenAI integration.
@@ -1059,19 +1280,33 @@ async def mcp_http_transport(
         creds = None
         if authorization:
             # Remove "Bearer " prefix if present
-            access_token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+            access_token = (
+                authorization.replace("Bearer ", "")
+                if authorization.startswith("Bearer ")
+                else authorization
+            )
 
             # Token validation and diagnostic logging
             logger.info("🔍 OAuth Token Diagnostic Information:")
             logger.info(f"  📋 Token length: {len(access_token)} characters")
-            logger.info(f"  🔗 Token prefix: {access_token[:15]}..." if len(access_token) > 15 else f"  🔗 Full token: {access_token}")
-            logger.info(f"  ✅ Expected prefix (ya29.): {'✅' if access_token.startswith('ya29.') else '❌'}")
+            logger.info(
+                f"  🔗 Token prefix: {access_token[:15]}..."
+                if len(access_token) > 15
+                else f"  🔗 Full token: {access_token}"
+            )
+            logger.info(
+                f"  ✅ Expected prefix (ya29.): {'✅' if access_token.startswith('ya29.') else '❌'}"
+            )
 
             # Basic format validation
-            if not access_token.startswith('ya29.'):
-                logger.warning("⚠️  Token does not have expected Google OAuth format (ya29.)")
+            if not access_token.startswith("ya29."):
+                logger.warning(
+                    "⚠️  Token does not have expected Google OAuth format (ya29.)"
+                )
             if len(access_token) < 50:
-                logger.warning("⚠️  Token appears unusually short for Google OAuth token")
+                logger.warning(
+                    "⚠️  Token appears unusually short for Google OAuth token"
+                )
             if len(access_token) > 2000:
                 logger.warning("⚠️  Token appears unusually long")
 
@@ -1083,39 +1318,63 @@ async def mcp_http_transport(
                 creds = get_production_credentials(access_token)
 
                 if not creds or not creds.valid:
-                    logger.warning("OAuth token validation failed or token refresh failed")
+                    logger.warning(
+                        "OAuth token validation failed or token refresh failed"
+                    )
                     return {
                         "jsonrpc": "2.0",
                         "error": {
                             "code": -32001,
-                            "message": "Authentication failed - invalid or expired OAuth token. Token may need manual refresh."
+                            "message": "Authentication failed - invalid or expired OAuth token. Token may need manual refresh.",
                         },
-                        "id": request.get("id")
+                        "id": request.get("id"),
                     }
 
-                logger.info("Successfully authenticated with OAuth token for MCP request (production mode)")
+                logger.info(
+                    "Successfully authenticated with OAuth token for MCP request (production mode)"
+                )
 
                 # Comprehensive credentials diagnostic logging
                 logger.info("🔍 Credentials Diagnostic Information:")
                 logger.info(f"  📊 Credentials object type: {type(creds).__name__}")
                 logger.info(f"  ✅ Credentials valid: {'✅' if creds.valid else '❌'}")
-                logger.info(f"  🗓️ Token expiry: {creds.expiry if hasattr(creds, 'expiry') and creds.expiry else 'Not available'}")
-                logger.info(f"  🔑 Has refresh_token: {'✅' if hasattr(creds, 'refresh_token') and creds.refresh_token else '❌'}")
-                logger.info(f"  🔐 Has client_id: {'✅' if hasattr(creds, 'client_id') and creds.client_id else '❌'}")
-                logger.info(f"  🔒 Has client_secret: {'✅' if hasattr(creds, 'client_secret') and creds.client_secret else '❌'}")
-                logger.info(f"  🌐 Has token_uri: {'✅' if hasattr(creds, 'token_uri') and creds.token_uri else '❌'}")
-                logger.info(f"  📋 Token scopes: {creds.scopes if hasattr(creds, 'scopes') else 'Not available'}")
+                logger.info(
+                    f"  🗓️ Token expiry: {creds.expiry if hasattr(creds, 'expiry') and creds.expiry else 'Not available'}"
+                )
+                logger.info(
+                    f"  🔑 Has refresh_token: {'✅' if hasattr(creds, 'refresh_token') and creds.refresh_token else '❌'}"
+                )
+                logger.info(
+                    f"  🔐 Has client_id: {'✅' if hasattr(creds, 'client_id') and creds.client_id else '❌'}"
+                )
+                logger.info(
+                    f"  🔒 Has client_secret: {'✅' if hasattr(creds, 'client_secret') and creds.client_secret else '❌'}"
+                )
+                logger.info(
+                    f"  🌐 Has token_uri: {'✅' if hasattr(creds, 'token_uri') and creds.token_uri else '❌'}"
+                )
+                logger.info(
+                    f"  📋 Token scopes: {creds.scopes if hasattr(creds, 'scopes') else 'Not available'}"
+                )
 
                 # OAuth refresh capability analysis
                 refresh_capable = (
-                    hasattr(creds, 'refresh_token') and creds.refresh_token and
-                    hasattr(creds, 'client_id') and creds.client_id and
-                    hasattr(creds, 'client_secret') and creds.client_secret and
-                    hasattr(creds, 'token_uri') and creds.token_uri
+                    hasattr(creds, "refresh_token")
+                    and creds.refresh_token
+                    and hasattr(creds, "client_id")
+                    and creds.client_id
+                    and hasattr(creds, "client_secret")
+                    and creds.client_secret
+                    and hasattr(creds, "token_uri")
+                    and creds.token_uri
                 )
-                logger.info(f"  🔄 OAuth refresh capable: {'✅' if refresh_capable else '❌'}")
+                logger.info(
+                    f"  🔄 OAuth refresh capable: {'✅' if refresh_capable else '❌'}"
+                )
                 if not refresh_capable:
-                    logger.warning("⚠️  Credentials missing fields required for automatic token refresh")
+                    logger.warning(
+                        "⚠️  Credentials missing fields required for automatic token refresh"
+                    )
 
             except Exception as e:
                 logger.error(f"Production OAuth token processing error: {e}")
@@ -1123,15 +1382,19 @@ async def mcp_http_transport(
                 # Fallback to complete token handling with environment variables
                 try:
                     from google.oauth2.credentials import Credentials
-                    from google.auth.transport.requests import Request
-                    logger.info("Falling back to environment-based token authentication")
+
+                    logger.info(
+                        "Falling back to environment-based token authentication"
+                    )
 
                     # Get OAuth credentials from environment variables
-                    client_id = os.getenv('GOOGLE_CLIENT_ID')
-                    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+                    client_id = os.getenv("GOOGLE_CLIENT_ID")
+                    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
                     if not client_id or not client_secret:
-                        logger.error("Missing required OAuth environment variables: GOOGLE_CLIENT_ID and/or GOOGLE_CLIENT_SECRET")
+                        logger.error(
+                            "Missing required OAuth environment variables: GOOGLE_CLIENT_ID and/or GOOGLE_CLIENT_SECRET"
+                        )
                         raise Exception("OAuth environment variables not configured")
 
                     # Create complete credentials object with all required fields for refresh
@@ -1141,29 +1404,42 @@ async def mcp_http_transport(
                         token_uri="https://oauth2.googleapis.com/token",
                         client_id=client_id,
                         client_secret=client_secret,
-                        scopes=['https://www.googleapis.com/auth/calendar']
+                        scopes=["https://www.googleapis.com/auth/calendar"],
                     )
 
-                    logger.info("Created complete credentials with OAuth environment variables")
+                    logger.info(
+                        "Created complete credentials with OAuth environment variables"
+                    )
 
                     # Validate token by making a test API call
                     try:
                         # Simple validation - try to refresh or validate the token
-                        if not access_token or len(access_token) < 20 or not access_token.startswith('ya29.'):
-                            logger.warning(f"Invalid token format: {access_token[:20]}...")
+                        if (
+                            not access_token
+                            or len(access_token) < 20
+                            or not access_token.startswith("ya29.")
+                        ):
+                            logger.warning(
+                                f"Invalid token format: {access_token[:20]}..."
+                            )
                             creds = None
                         else:
                             # Test the token by actually calling Google's API
                             from googleapiclient.discovery import build
-                            service = build('calendar', 'v3', credentials=creds)
+
+                            service = build("calendar", "v3", credentials=creds)
 
                             # Make a minimal API call to validate the token
                             try:
                                 # Try to get the user's calendar list - minimal API call
-                                calendar_list = service.calendarList().list(maxResults=1).execute()
-                                logger.info("Token validation successful - API call succeeded")
+                                service.calendarList().list(maxResults=1).execute()
+                                logger.info(
+                                    "Token validation successful - API call succeeded"
+                                )
                             except Exception as api_error:
-                                logger.warning(f"Token validation failed - API call failed: {api_error}")
+                                logger.warning(
+                                    f"Token validation failed - API call failed: {api_error}"
+                                )
                                 creds = None
 
                     except Exception as token_test_error:
@@ -1177,22 +1453,24 @@ async def mcp_http_transport(
                             "jsonrpc": "2.0",
                             "error": {
                                 "code": -32001,
-                                "message": "Authentication failed - invalid OAuth token (basic mode)"
+                                "message": "Authentication failed - invalid OAuth token (basic mode)",
                             },
-                            "id": request.get("id")
+                            "id": request.get("id"),
                         }
 
                     logger.info("Successfully authenticated with basic OAuth token")
 
                 except Exception as fallback_error:
-                    logger.error(f"Fallback OAuth token processing also failed: {fallback_error}")
+                    logger.error(
+                        f"Fallback OAuth token processing also failed: {fallback_error}"
+                    )
                     return {
                         "jsonrpc": "2.0",
                         "error": {
                             "code": -32001,
-                            "message": f"Authentication failed - OAuth token error: {str(e)}"
+                            "message": f"Authentication failed - OAuth token error: {str(e)}",
                         },
-                        "id": request.get("id")
+                        "id": request.get("id"),
                     }
 
         # Require authentication for all MCP operations
@@ -1202,9 +1480,9 @@ async def mcp_http_transport(
                 "jsonrpc": "2.0",
                 "error": {
                     "code": -32001,
-                    "message": "Authentication required - missing Authorization header"
+                    "message": "Authentication required - missing Authorization header",
                 },
-                "id": request.get("id")
+                "id": request.get("id"),
             }
 
         if not creds or not creds.valid:
@@ -1213,9 +1491,9 @@ async def mcp_http_transport(
                 "jsonrpc": "2.0",
                 "error": {
                     "code": -32001,
-                    "message": "Authentication failed - invalid or expired OAuth token"
+                    "message": "Authentication failed - invalid or expired OAuth token",
                 },
-                "id": request.get("id")
+                "id": request.get("id"),
             }
 
         # Handle MCP protocol messages (all require valid authentication)
@@ -1232,23 +1510,18 @@ async def mcp_http_transport(
         else:
             return {
                 "jsonrpc": "2.0",
-                "error": {
-                    "code": -32601,
-                    "message": f"Method not found: {method}"
-                },
-                "id": request_id
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+                "id": request_id,
             }
 
     except Exception as e:
         logger.error(f"MCP HTTP transport error: {e}", exc_info=True)
         return {
             "jsonrpc": "2.0",
-            "error": {
-                "code": -32603,
-                "message": f"Internal error: {str(e)}"
-            },
-            "id": request.get("id")
+            "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+            "id": request.get("id"),
         }
+
 
 def handle_mcp_initialize(request_id):
     """Handle MCP initialize request."""
@@ -1256,16 +1529,12 @@ def handle_mcp_initialize(request_id):
         "jsonrpc": "2.0",
         "result": {
             "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "tools": {}
-            },
-            "serverInfo": {
-                "name": "google-calendar-mcp",
-                "version": "1.0.0"
-            }
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "google-calendar-mcp", "version": "1.0.0"},
         },
-        "id": request_id
+        "id": request_id,
     }
+
 
 def handle_mcp_tools_list(request_id):
     """Handle MCP tools/list request - returns available calendar tools."""
@@ -1279,10 +1548,10 @@ def handle_mcp_tools_list(request_id):
                     "min_access_role": {
                         "type": "string",
                         "description": "Minimum access role ('reader', 'writer', 'owner')",
-                        "enum": ["reader", "writer", "owner"]
+                        "enum": ["reader", "writer", "owner"],
                     }
-                }
-            }
+                },
+            },
         },
         {
             "name": "find_events",
@@ -1290,14 +1559,29 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier"},
-                    "time_min": {"type": "string", "description": "Start time (ISO format)"},
-                    "time_max": {"type": "string", "description": "End time (ISO format)"},
-                    "query": {"type": "string", "description": "Free text search query"},
-                    "max_results": {"type": "integer", "description": "Maximum number of events"}
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                    },
+                    "time_min": {
+                        "type": "string",
+                        "description": "Start time (ISO format)",
+                    },
+                    "time_max": {
+                        "type": "string",
+                        "description": "End time (ISO format)",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Free text search query",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of events",
+                    },
                 },
-                "required": ["calendar_id"]
-            }
+                "required": ["calendar_id"],
+            },
         },
         {
             "name": "quick_add_event",
@@ -1305,11 +1589,17 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier"},
-                    "text": {"type": "string", "description": "Natural language event description"}
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Natural language event description",
+                    },
                 },
-                "required": ["calendar_id", "text"]
-            }
+                "required": ["calendar_id", "text"],
+            },
         },
         {
             "name": "create_event",
@@ -1317,16 +1607,32 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier"},
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                    },
                     "summary": {"type": "string", "description": "Event title"},
-                    "start_time": {"type": "string", "description": "Start time (ISO format)"},
-                    "end_time": {"type": "string", "description": "End time (ISO format)"},
-                    "description": {"type": "string", "description": "Event description"},
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time (ISO format)",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "End time (ISO format)",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description",
+                    },
                     "location": {"type": "string", "description": "Event location"},
-                    "attendee_emails": {"type": "array", "items": {"type": "string"}, "description": "Attendee emails"}
+                    "attendee_emails": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Attendee emails",
+                    },
                 },
-                "required": ["calendar_id", "summary", "start_time", "end_time"]
-            }
+                "required": ["calendar_id", "summary", "start_time", "end_time"],
+            },
         },
         {
             "name": "update_event",
@@ -1334,16 +1640,25 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier"},
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                    },
                     "event_id": {"type": "string", "description": "Event identifier"},
                     "summary": {"type": "string", "description": "New event title"},
-                    "start_time": {"type": "string", "description": "New start time (ISO format)"},
-                    "end_time": {"type": "string", "description": "New end time (ISO format)"},
+                    "start_time": {
+                        "type": "string",
+                        "description": "New start time (ISO format)",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "New end time (ISO format)",
+                    },
                     "description": {"type": "string", "description": "New description"},
-                    "location": {"type": "string", "description": "New location"}
+                    "location": {"type": "string", "description": "New location"},
                 },
-                "required": ["calendar_id", "event_id"]
-            }
+                "required": ["calendar_id", "event_id"],
+            },
         },
         {
             "name": "delete_event",
@@ -1351,11 +1666,14 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier"},
-                    "event_id": {"type": "string", "description": "Event identifier"}
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                    },
+                    "event_id": {"type": "string", "description": "Event identifier"},
                 },
-                "required": ["calendar_id", "event_id"]
-            }
+                "required": ["calendar_id", "event_id"],
+            },
         },
         {
             "name": "check_free_busy",
@@ -1363,12 +1681,22 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_ids": {"type": "array", "items": {"type": "string"}, "description": "Calendar IDs"},
-                    "time_min": {"type": "string", "description": "Start time (ISO format)"},
-                    "time_max": {"type": "string", "description": "End time (ISO format)"}
+                    "calendar_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Calendar IDs",
+                    },
+                    "time_min": {
+                        "type": "string",
+                        "description": "Start time (ISO format)",
+                    },
+                    "time_max": {
+                        "type": "string",
+                        "description": "End time (ISO format)",
+                    },
                 },
-                "required": ["calendar_ids", "time_min", "time_max"]
-            }
+                "required": ["calendar_ids", "time_min", "time_max"],
+            },
         },
         {
             "name": "voice_book_appointment",
@@ -1376,12 +1704,23 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "natural_language_request": {"type": "string", "description": "Natural language appointment request"},
-                    "calendar_id": {"type": "string", "description": "Calendar identifier", "default": "primary"},
-                    "user_timezone": {"type": "string", "description": "User's timezone", "default": "UTC"}
+                    "natural_language_request": {
+                        "type": "string",
+                        "description": "Natural language appointment request",
+                    },
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                        "default": "primary",
+                    },
+                    "user_timezone": {
+                        "type": "string",
+                        "description": "User's timezone",
+                        "default": "UTC",
+                    },
                 },
-                "required": ["natural_language_request"]
-            }
+                "required": ["natural_language_request"],
+            },
         },
         {
             "name": "voice_check_availability",
@@ -1389,12 +1728,23 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_request": {"type": "string", "description": "Natural language time request"},
-                    "calendar_id": {"type": "string", "description": "Calendar identifier", "default": "primary"},
-                    "duration_minutes": {"type": "integer", "description": "Duration in minutes", "default": 60}
+                    "time_request": {
+                        "type": "string",
+                        "description": "Natural language time request",
+                    },
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                        "default": "primary",
+                    },
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "Duration in minutes",
+                        "default": 60,
+                    },
                 },
-                "required": ["time_request"]
-            }
+                "required": ["time_request"],
+            },
         },
         {
             "name": "voice_get_upcoming",
@@ -1402,20 +1752,23 @@ def handle_mcp_tools_list(request_id):
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "calendar_id": {"type": "string", "description": "Calendar identifier", "default": "primary"},
-                    "limit": {"type": "integer", "description": "Number of events to return", "default": 5}
-                }
-            }
-        }
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar identifier",
+                        "default": "primary",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of events to return",
+                        "default": 5,
+                    },
+                },
+            },
+        },
     ]
 
-    return {
-        "jsonrpc": "2.0",
-        "result": {
-            "tools": tools
-        },
-        "id": request_id
-    }
+    return {"jsonrpc": "2.0", "result": {"tools": tools}, "id": request_id}
+
 
 async def handle_mcp_tool_call(request_id, params, creds):
     """Handle MCP tools/call request - executes the specified tool."""
@@ -1426,18 +1779,14 @@ async def handle_mcp_tool_call(request_id, params, creds):
         if not creds:
             return {
                 "jsonrpc": "2.0",
-                "error": {
-                    "code": -32002,
-                    "message": "Authentication required"
-                },
-                "id": request_id
+                "error": {"code": -32002, "message": "Authentication required"},
+                "id": request_id,
             }
 
         # Map MCP tool calls to calendar actions
         if tool_name == "list_calendars":
             result = calendar_actions.find_calendars(
-                credentials=creds,
-                min_access_role=arguments.get("min_access_role")
+                credentials=creds, min_access_role=arguments.get("min_access_role")
             )
         elif tool_name == "find_events":
             result = calendar_actions.find_events(
@@ -1446,7 +1795,7 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 time_min=arguments.get("time_min"),
                 time_max=arguments.get("time_max"),
                 query=arguments.get("query"),
-                max_results=arguments.get("max_results", 50)
+                max_results=arguments.get("max_results", 50),
             )
         elif tool_name == "quick_add_event":
             # Quick add event using Google Calendar's natural language parsing
@@ -1455,16 +1804,20 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     credentials=creds,
                     calendar_id=arguments["calendar_id"],
                     text=arguments["text"],
-                    send_notifications=arguments.get("send_notifications", False)
+                    send_notifications=arguments.get("send_notifications", False),
                 )
 
                 if booking_result:
                     # Format response consistently with voice functions
                     event_start = booking_result.start
                     if event_start and event_start.dateTime:
-                        formatted_time = event_start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                        formatted_time = event_start.dateTime.strftime(
+                            "%A, %B %d at %I:%M %p"
+                        )
                     elif event_start and event_start.date:
-                        formatted_time = f"All day on {event_start.date.strftime('%A, %B %d')}"
+                        formatted_time = (
+                            f"All day on {event_start.date.strftime('%A, %B %d')}"
+                        )
                     else:
                         formatted_time = "the requested time"
 
@@ -1472,67 +1825,85 @@ async def handle_mcp_tool_call(request_id, params, creds):
                         "success": True,
                         "message": f"Event created: {booking_result.summary or 'Appointment'} scheduled for {formatted_time}",
                         "event_id": booking_result.id,
-                        "event_link": booking_result.html_link
+                        "event_link": booking_result.html_link,
                     }
                 else:
                     result = {
                         "success": False,
-                        "error": "Failed to create event via Google Calendar API"
+                        "error": "Failed to create event via Google Calendar API",
                     }
 
             except Exception as e:
+                result = {"success": False, "error": f"Calendar API error: {str(e)}"}
+        elif tool_name == "create_event":
+            try:
+                # Validate MCP parameters first
+                validation_errors = validate_mcp_create_params(arguments)
+                if validation_errors:
+                    result = {
+                        "success": False,
+                        "error": f"Invalid parameters: {validation_errors}",
+                    }
+                else:
+                    # Convert MCP flat parameters to proper Pydantic model
+                    event_data = mcp_params_to_event_create_request(arguments)
+
+                    # Call calendar_actions with proper Pydantic model
+                    result = calendar_actions.create_event(
+                        credentials=creds,
+                        calendar_id=arguments["calendar_id"],
+                        event_data=event_data,  # Now a proper EventCreateRequest object
+                    )
+            except ValueError as e:
                 result = {
                     "success": False,
-                    "error": f"Calendar API error: {str(e)}"
+                    "error": f"Parameter conversion error: {str(e)}",
                 }
-        elif tool_name == "create_event":
-            result = calendar_actions.create_event(
-                credentials=creds,
-                calendar_id=arguments["calendar_id"],
-                event_data={
-                    "summary": arguments["summary"],
-                    "start": {"dateTime": arguments["start_time"]},
-                    "end": {"dateTime": arguments["end_time"]},
-                    "description": arguments.get("description"),
-                    "location": arguments.get("location"),
-                    "attendees": [{"email": email} for email in arguments.get("attendee_emails", [])]
-                }
-            )
+            except Exception as e:
+                result = {"success": False, "error": f"Event creation error: {str(e)}"}
         elif tool_name == "update_event":
-            update_data = {}
-            if "summary" in arguments:
-                update_data["summary"] = arguments["summary"]
-            if "start_time" in arguments:
-                update_data["start"] = {"dateTime": arguments["start_time"]}
-            if "end_time" in arguments:
-                update_data["end"] = {"dateTime": arguments["end_time"]}
-            if "description" in arguments:
-                update_data["description"] = arguments["description"]
-            if "location" in arguments:
-                update_data["location"] = arguments["location"]
+            try:
+                # Convert MCP flat parameters to proper Pydantic model
+                event_update_data = mcp_params_to_event_update_request(arguments)
 
-            result = calendar_actions.update_event(
-                credentials=creds,
-                calendar_id=arguments["calendar_id"],
-                event_id=arguments["event_id"],
-                event_data=update_data
-            )
+                # Call calendar_actions with proper Pydantic model
+                result = calendar_actions.update_event(
+                    credentials=creds,
+                    calendar_id=arguments["calendar_id"],
+                    event_id=arguments["event_id"],
+                    event_data=event_update_data,  # Now a proper EventUpdateRequest object
+                )
+            except ValueError as e:
+                result = {
+                    "success": False,
+                    "error": f"Parameter conversion error: {str(e)}",
+                }
+            except Exception as e:
+                result = {"success": False, "error": f"Event update error: {str(e)}"}
         elif tool_name == "delete_event":
             result = calendar_actions.delete_event(
                 credentials=creds,
                 calendar_id=arguments["calendar_id"],
-                event_id=arguments["event_id"]
+                event_id=arguments["event_id"],
             )
         elif tool_name == "check_free_busy":
             # Parse time strings to datetime objects
-            time_min_dt = parser.isoparse(arguments["time_min"]) if isinstance(arguments["time_min"], str) else arguments["time_min"]
-            time_max_dt = parser.isoparse(arguments["time_max"]) if isinstance(arguments["time_max"], str) else arguments["time_max"]
+            time_min_dt = (
+                parser.isoparse(arguments["time_min"])
+                if isinstance(arguments["time_min"], str)
+                else arguments["time_min"]
+            )
+            time_max_dt = (
+                parser.isoparse(arguments["time_max"])
+                if isinstance(arguments["time_max"], str)
+                else arguments["time_max"]
+            )
 
             result = calendar_actions.find_availability(
                 credentials=creds,
                 calendar_ids=arguments["calendar_ids"],
                 time_min=time_min_dt,
-                time_max=time_max_dt
+                time_max=time_max_dt,
             )
         elif tool_name == "voice_book_appointment":
             # Voice-optimized booking using natural language
@@ -1540,16 +1911,20 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 booking_result = calendar_actions.quick_add_event(
                     credentials=creds,
                     calendar_id=arguments.get("calendar_id", "primary"),
-                    text=arguments["natural_language_request"]
+                    text=arguments["natural_language_request"],
                 )
 
                 if booking_result:
                     # Format response in voice-friendly way
                     event_start = booking_result.start
                     if event_start and event_start.dateTime:
-                        formatted_time = event_start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                        formatted_time = event_start.dateTime.strftime(
+                            "%A, %B %d at %I:%M %p"
+                        )
                     elif event_start and event_start.date:
-                        formatted_time = f"All day on {event_start.date.strftime('%A, %B %d')}"
+                        formatted_time = (
+                            f"All day on {event_start.date.strftime('%A, %B %d')}"
+                        )
                     else:
                         formatted_time = "the requested time"
 
@@ -1557,15 +1932,18 @@ async def handle_mcp_tool_call(request_id, params, creds):
                         "success": True,
                         "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{booking_result.summary or 'Appointment'}' has been added to your calendar.",
                         "event_id": booking_result.id,
-                        "event_link": booking_result.html_link
+                        "event_link": booking_result.html_link,
                     }
                 else:
                     result = {
                         "success": False,
-                        "message": "I couldn't understand the appointment details. Could you please be more specific about the date, time, and description?"
+                        "message": "I couldn't understand the appointment details. Could you please be more specific about the date, time, and description?",
                     }
             except Exception as e:
-                result = {"success": False, "message": f"I'm sorry, I encountered an issue while booking your appointment: {str(e)}"}
+                result = {
+                    "success": False,
+                    "message": f"I'm sorry, I encountered an issue while booking your appointment: {str(e)}",
+                }
 
         elif tool_name == "voice_check_availability":
             # Voice-optimized availability checking
@@ -1586,21 +1964,25 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     target_date = now
 
                 # Set business hours for availability check
-                time_min = target_date.replace(hour=9, minute=0, second=0, microsecond=0)
-                time_max = target_date.replace(hour=17, minute=0, second=0, microsecond=0)
+                time_min = target_date.replace(
+                    hour=9, minute=0, second=0, microsecond=0
+                )
+                time_max = target_date.replace(
+                    hour=17, minute=0, second=0, microsecond=0
+                )
 
                 # Check for busy periods
                 busy_periods = calendar_actions.find_availability(
                     credentials=creds,
                     calendar_ids=[arguments.get("calendar_id", "primary")],
                     time_min=time_min,
-                    time_max=time_max
+                    time_max=time_max,
                 )
 
                 calendar_id = arguments.get("calendar_id", "primary")
                 busy_count = 0
                 if busy_periods and calendar_id in busy_periods:
-                    busy_intervals = busy_periods[calendar_id].get('busy', [])
+                    busy_intervals = busy_periods[calendar_id].get("busy", [])
                     busy_count = len(busy_intervals)
 
                 if busy_count == 0:
@@ -1617,10 +1999,13 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     "success": True,
                     "message": message,
                     "availability": availability,
-                    "busy_periods_count": busy_count
+                    "busy_periods_count": busy_count,
                 }
             except Exception as e:
-                result = {"success": False, "message": f"I'm having trouble checking your availability: {str(e)}"}
+                result = {
+                    "success": False,
+                    "message": f"I'm having trouble checking your availability: {str(e)}",
+                }
 
         elif tool_name == "voice_get_upcoming":
             # Voice-optimized upcoming events
@@ -1636,8 +2021,8 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     time_min=time_min,
                     time_max=time_max,
                     max_results=arguments.get("limit", 5),
-                    order_by='startTime',
-                    single_events=True
+                    order_by="startTime",
+                    single_events=True,
                 )
 
                 events = events_response.items if events_response else []
@@ -1647,7 +2032,7 @@ async def handle_mcp_tool_call(request_id, params, creds):
                         "success": True,
                         "message": "You don't have any appointments coming up in the next week. Your schedule is clear!",
                         "events_count": 0,
-                        "events": []
+                        "events": [],
                     }
                 else:
                     # Format events for voice response
@@ -1655,18 +2040,26 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     for event in events:
                         start = event.start
                         if start and start.dateTime:
-                            formatted_time = start.dateTime.strftime("%A, %B %d at %I:%M %p")
+                            formatted_time = start.dateTime.strftime(
+                                "%A, %B %d at %I:%M %p"
+                            )
                         elif start and start.date:
-                            formatted_time = f"All day on {start.date.strftime('%A, %B %d')}"
+                            formatted_time = (
+                                f"All day on {start.date.strftime('%A, %B %d')}"
+                            )
                         else:
                             formatted_time = "Time not specified"
 
-                        voice_events.append({
-                            "summary": event.summary or 'Untitled Event',
-                            "start_time": formatted_time,
-                            "location": event.location or '',
-                            "description": (event.description or '')[:100] if event.description else ''
-                        })
+                        voice_events.append(
+                            {
+                                "summary": event.summary or "Untitled Event",
+                                "start_time": formatted_time,
+                                "location": event.location or "",
+                                "description": (event.description or "")[:100]
+                                if event.description
+                                else "",
+                            }
+                        )
 
                     if len(events) == 1:
                         message = f"You have 1 appointment coming up: {voice_events[0]['summary']} on {voice_events[0]['start_time']}."
@@ -1677,19 +2070,19 @@ async def handle_mcp_tool_call(request_id, params, creds):
                         "success": True,
                         "message": message,
                         "events_count": len(events),
-                        "events": voice_events
+                        "events": voice_events,
                     }
             except Exception as e:
-                result = {"success": False, "message": f"I'm having trouble accessing your calendar: {str(e)}"}
+                result = {
+                    "success": False,
+                    "message": f"I'm having trouble accessing your calendar: {str(e)}",
+                }
 
         else:
             return {
                 "jsonrpc": "2.0",
-                "error": {
-                    "code": -32601,
-                    "message": f"Tool not found: {tool_name}"
-                },
-                "id": request_id
+                "error": {"code": -32601, "message": f"Tool not found: {tool_name}"},
+                "id": request_id,
             }
 
         # Convert result to string if needed for MCP protocol
@@ -1702,19 +2095,14 @@ async def handle_mcp_tool_call(request_id, params, creds):
 
         return {
             "jsonrpc": "2.0",
-            "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": content
-                    }
-                ]
-            },
-            "id": request_id
+            "result": {"content": [{"type": "text", "text": content}]},
+            "id": request_id,
         }
 
     except RefreshError as refresh_error:
-        logger.error(f"OAuth token refresh failed during MCP tool call: {refresh_error}")
+        logger.error(
+            f"OAuth token refresh failed during MCP tool call: {refresh_error}"
+        )
         logger.warning("Access token has expired and cannot be refreshed automatically")
 
         # Phase 2: Try service account authentication as fallback
@@ -1722,10 +2110,14 @@ async def handle_mcp_tool_call(request_id, params, creds):
         service_account_creds = get_service_account_credentials()
 
         if service_account_creds and service_account_creds.valid:
-            logger.info("✅ Service account fallback successful, retrying MCP tool call...")
+            logger.info(
+                "✅ Service account fallback successful, retrying MCP tool call..."
+            )
             try:
                 # Retry the tool call with service account credentials
-                return await handle_mcp_tool_call(request_id, params, service_account_creds)
+                return await handle_mcp_tool_call(
+                    request_id, params, service_account_creds
+                )
             except Exception as fallback_error:
                 logger.error(f"❌ Service account fallback failed: {fallback_error}")
                 return {
@@ -1737,10 +2129,10 @@ async def handle_mcp_tool_call(request_id, params, creds):
                             "error_type": "authentication_failed",
                             "oauth_error": str(refresh_error),
                             "service_account_error": str(fallback_error),
-                            "suggestion": "Check OAuth token validity or service account configuration"
-                        }
+                            "suggestion": "Check OAuth token validity or service account configuration",
+                        },
                     },
-                    "id": request_id
+                    "id": request_id,
                 }
         else:
             logger.warning("❌ Service account fallback not available or invalid")
@@ -1752,10 +2144,10 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     "data": {
                         "error_type": "oauth_refresh_failed",
                         "suggestion": "The client should request a new access token",
-                        "service_account_available": bool(service_account_creds)
-                    }
+                        "service_account_available": bool(service_account_creds),
+                    },
                 },
-                "id": request_id
+                "id": request_id,
             }
     except (DefaultCredentialsError, TransportError) as auth_error:
         logger.error(f"OAuth authentication error during MCP tool call: {auth_error}")
@@ -1766,33 +2158,34 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 "message": "OAuth authentication failed. Please check your credentials.",
                 "data": {
                     "error_type": "oauth_authentication_failed",
-                    "suggestion": "Verify OAuth configuration and credentials"
-                }
+                    "suggestion": "Verify OAuth configuration and credentials",
+                },
             },
-            "id": request_id
+            "id": request_id,
         }
     except Exception as e:
         logger.error(f"MCP tool call error: {e}", exc_info=True)
         return {
             "jsonrpc": "2.0",
-            "error": {
-                "code": -32603,
-                "message": f"Tool execution error: {str(e)}"
-            },
-            "id": request_id
+            "error": {"code": -32603, "message": f"Tool execution error: {str(e)}"},
+            "id": request_id,
         }
 
+
 # --- MCP Testing Endpoint ---
+
 
 @app.post(
     "/test/mcp",
     tags=["Testing"],
     summary="Test MCP Implementation",
-    operation_id="test_mcp_implementation"
+    operation_id="test_mcp_implementation",
 )
 async def test_mcp_implementation(
-    test_oauth_token: str = Body(..., description="Test OAuth token for Google Calendar"),
-    test_tool: str = Body("list_calendars", description="Tool to test")
+    test_oauth_token: str = Body(
+        ..., description="Test OAuth token for Google Calendar"
+    ),
+    test_tool: str = Body("list_calendars", description="Tool to test"),
 ):
     """
     Test endpoint to verify MCP implementation works correctly with OAuth tokens.
@@ -1802,18 +2195,13 @@ async def test_mcp_implementation(
         # Simulate MCP protocol messages
         test_requests = [
             # Initialize
-            {
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "id": "test_init",
-                "params": {}
-            },
+            {"jsonrpc": "2.0", "method": "initialize", "id": "test_init", "params": {}},
             # List tools
             {
                 "jsonrpc": "2.0",
                 "method": "tools/list",
                 "id": "test_tools",
-                "params": {}
+                "params": {},
             },
             # Call a tool
             {
@@ -1822,9 +2210,11 @@ async def test_mcp_implementation(
                 "id": "test_call",
                 "params": {
                     "name": test_tool,
-                    "arguments": {"calendar_id": "primary"} if test_tool == "find_events" else {}
-                }
-            }
+                    "arguments": {"calendar_id": "primary"}
+                    if test_tool == "find_events"
+                    else {},
+                },
+            },
         ]
 
         results = []
@@ -1833,18 +2223,15 @@ async def test_mcp_implementation(
             response = await mcp_http_transport(
                 request=request,
                 authorization=f"Bearer {test_oauth_token}",
-                user_id=None
+                user_id=None,
             )
-            results.append({
-                "request": request,
-                "response": response
-            })
+            results.append({"request": request, "response": response})
 
         return {
             "status": "success",
             "message": "MCP implementation test completed",
             "results": results,
-            "openai_integration_ready": True
+            "openai_integration_ready": True,
         }
 
     except Exception as e:
@@ -1852,22 +2239,26 @@ async def test_mcp_implementation(
         return {
             "status": "error",
             "message": f"MCP test failed: {str(e)}",
-            "openai_integration_ready": False
+            "openai_integration_ready": False,
         }
 
+
 # --- OpenAI-Optimized Endpoints for Voice Agent Integration ---
+
 
 @app.post(
     "/voice/appointment/book",
     tags=["Voice Agent"],
     summary="Book Appointment via Voice Agent",
-    operation_id="voice_book_appointment"
+    operation_id="voice_book_appointment",
 )
 def voice_book_appointment(
-    natural_language_request: str = Body(..., description="Natural language appointment request"),
+    natural_language_request: str = Body(
+        ..., description="Natural language appointment request"
+    ),
     user_timezone: str = Body("UTC", description="User's timezone for the appointment"),
     calendar_id: str = Body("primary", description="Calendar to book in"),
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Books an appointment using natural language input from voice agents.
@@ -1878,16 +2269,14 @@ def voice_book_appointment(
 
         # Use Google's quick add feature for natural language parsing
         result = calendar_actions.quick_add_event(
-            credentials=creds,
-            calendar_id=calendar_id,
-            text=natural_language_request
+            credentials=creds, calendar_id=calendar_id, text=natural_language_request
         )
 
         if not result:
             return {
                 "success": False,
                 "message": "I couldn't understand the appointment details. Could you please be more specific about the date, time, and description?",
-                "suggestion": "Try saying something like 'Schedule a meeting with John tomorrow at 2 PM for one hour'"
+                "suggestion": "Try saying something like 'Schedule a meeting with John tomorrow at 2 PM for one hour'",
             }
 
         # Format response for voice agent
@@ -1906,7 +2295,7 @@ def voice_book_appointment(
             "message": f"Perfect! I've scheduled your appointment for {formatted_time}. The event '{result.summary or 'Appointment'}' has been added to your calendar.",
             "event_id": result.id,
             "event_link": result.html_link,
-            "calendar_id": calendar_id
+            "calendar_id": calendar_id,
         }
 
     except Exception as e:
@@ -1914,20 +2303,21 @@ def voice_book_appointment(
         return {
             "success": False,
             "message": "I'm sorry, I encountered an issue while booking your appointment. Please try again or provide more specific details.",
-            "error_type": "booking_error"
+            "error_type": "booking_error",
         }
+
 
 @app.post(
     "/voice/appointment/check",
     tags=["Voice Agent"],
     summary="Check Availability via Voice Agent",
-    operation_id="voice_check_availability"
+    operation_id="voice_check_availability",
 )
 def voice_check_availability(
     time_request: str = Body(..., description="Natural language time request"),
     duration_minutes: int = Body(60, description="Duration in minutes"),
     calendar_id: str = Body("primary", description="Calendar to check"),
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Checks availability using natural language input optimized for voice agents.
@@ -1938,7 +2328,6 @@ def voice_check_availability(
         # Parse the natural language time request
         # For now, we'll use a simple approach and could enhance with NLP libraries
         from datetime import datetime, timedelta
-        import re
 
         # Basic parsing for common phrases
         now = datetime.utcnow()
@@ -1963,12 +2352,12 @@ def voice_check_availability(
             credentials=creds,
             calendar_ids=[calendar_id],
             time_min=time_min,
-            time_max=time_max
+            time_max=time_max,
         )
 
         busy_count = 0
         if busy_periods and calendar_id in busy_periods:
-            busy_intervals = busy_periods[calendar_id].get('busy', [])
+            busy_intervals = busy_periods[calendar_id].get("busy", [])
             busy_count = len(busy_intervals)
 
         if busy_count == 0:
@@ -1976,7 +2365,13 @@ def voice_check_availability(
                 "success": True,
                 "message": f"You appear to be completely free on {target_date.strftime('%A, %B %d')} during business hours.",
                 "availability": "free",
-                "suggested_times": ["9:00 AM", "10:00 AM", "11:00 AM", "2:00 PM", "3:00 PM"]
+                "suggested_times": [
+                    "9:00 AM",
+                    "10:00 AM",
+                    "11:00 AM",
+                    "2:00 PM",
+                    "3:00 PM",
+                ],
             }
 
         if busy_count == 0:
@@ -1990,7 +2385,7 @@ def voice_check_availability(
             "success": True,
             "message": message,
             "availability": "partial" if busy_count <= 3 else "busy",
-            "busy_periods_count": busy_count
+            "busy_periods_count": busy_count,
         }
 
     except Exception as e:
@@ -1998,19 +2393,20 @@ def voice_check_availability(
         return {
             "success": False,
             "message": "I'm having trouble checking your availability right now. Please try again.",
-            "error_type": "availability_error"
+            "error_type": "availability_error",
         }
+
 
 @app.get(
     "/voice/appointment/upcoming",
     tags=["Voice Agent"],
     summary="Get Upcoming Appointments for Voice Agent",
-    operation_id="voice_get_upcoming"
+    operation_id="voice_get_upcoming",
 )
 def voice_get_upcoming_appointments(
     limit: int = Query(5, description="Number of upcoming events to return"),
     calendar_id: str = Query("primary", description="Calendar to check"),
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Gets upcoming appointments with voice-friendly responses.
@@ -2028,8 +2424,8 @@ def voice_get_upcoming_appointments(
             time_min=time_min,
             time_max=time_max,
             max_results=limit,
-            order_by='startTime',
-            single_events=True
+            order_by="startTime",
+            single_events=True,
         )
 
         if not events_response:
@@ -2037,7 +2433,7 @@ def voice_get_upcoming_appointments(
                 "success": True,
                 "message": "You don't have any appointments coming up in the next week. Your schedule is clear!",
                 "events_count": 0,
-                "events": []
+                "events": [],
             }
 
         events = events_response.items
@@ -2047,7 +2443,7 @@ def voice_get_upcoming_appointments(
                 "success": True,
                 "message": "You don't have any appointments coming up in the next week. Your schedule is clear!",
                 "events_count": 0,
-                "events": []
+                "events": [],
             }
 
         # Format events for voice response
@@ -2061,12 +2457,16 @@ def voice_get_upcoming_appointments(
             else:
                 formatted_time = "Time not specified"
 
-            voice_events.append({
-                "summary": event.summary or 'Untitled Event',
-                "start_time": formatted_time,
-                "location": event.location or '',
-                "description": (event.description or '')[:100] if event.description else ''
-            })
+            voice_events.append(
+                {
+                    "summary": event.summary or "Untitled Event",
+                    "start_time": formatted_time,
+                    "location": event.location or "",
+                    "description": (event.description or "")[:100]
+                    if event.description
+                    else "",
+                }
+            )
 
         # Create voice-friendly summary
         if len(events) == 1:
@@ -2078,7 +2478,7 @@ def voice_get_upcoming_appointments(
             "success": True,
             "message": message,
             "events_count": len(events),
-            "events": voice_events
+            "events": voice_events,
         }
 
     except Exception as e:
@@ -2086,19 +2486,22 @@ def voice_get_upcoming_appointments(
         return {
             "success": False,
             "message": "I'm having trouble accessing your calendar right now. Please try again.",
-            "error_type": "calendar_access_error"
+            "error_type": "calendar_access_error",
         }
+
 
 @app.post(
     "/voice/appointment/cancel",
     tags=["Voice Agent"],
     summary="Cancel Appointment via Voice Agent",
-    operation_id="voice_cancel_appointment"
+    operation_id="voice_cancel_appointment",
 )
 def voice_cancel_appointment(
-    appointment_description: str = Body(..., description="Description of appointment to cancel"),
+    appointment_description: str = Body(
+        ..., description="Description of appointment to cancel"
+    ),
     calendar_id: str = Body("primary", description="Calendar to search"),
-    creds: Credentials = Depends(get_user_credentials)
+    creds: Credentials = Depends(get_user_credentials),
 ):
     """
     Cancels an appointment based on natural language description.
@@ -2116,14 +2519,14 @@ def voice_cancel_appointment(
             time_min=time_min,
             time_max=time_max,
             query=appointment_description,  # Search query
-            single_events=True
+            single_events=True,
         )
 
         if not events_response or not events_response.items:
             return {
                 "success": False,
                 "message": f"I couldn't find any appointments matching '{appointment_description}'. Could you be more specific or check if the appointment exists?",
-                "found_events": 0
+                "found_events": 0,
             }
 
         events = events_response.items
@@ -2140,14 +2543,17 @@ def voice_cancel_appointment(
                 else:
                     formatted_time = "Time not specified"
 
-                event_list.append(f"{i+1}. {event.summary or 'Untitled'} on {formatted_time}")
+                event_list.append(
+                    f"{i + 1}. {event.summary or 'Untitled'} on {formatted_time}"
+                )
 
             return {
                 "success": False,
-                "message": f"I found {len(events)} appointments matching that description. Which one would you like to cancel? " + "; ".join(event_list),
+                "message": f"I found {len(events)} appointments matching that description. Which one would you like to cancel? "
+                + "; ".join(event_list),
                 "found_events": len(events),
                 "events": event_list,
-                "requires_selection": True
+                "requires_selection": True,
             }
 
         # Cancel the single found event
@@ -2155,9 +2561,7 @@ def voice_cancel_appointment(
         event_id = event.id
 
         success = calendar_actions.delete_event(
-            credentials=creds,
-            calendar_id=calendar_id,
-            event_id=event_id
+            credentials=creds, calendar_id=calendar_id, event_id=event_id
         )
 
         if success:
@@ -2172,14 +2576,14 @@ def voice_cancel_appointment(
             return {
                 "success": True,
                 "message": f"I've successfully cancelled '{event.summary or 'your appointment'}' scheduled for {formatted_time}.",
-                "cancelled_event": event.summary or 'Untitled Event',
-                "event_time": formatted_time
+                "cancelled_event": event.summary or "Untitled Event",
+                "event_time": formatted_time,
             }
         else:
             return {
                 "success": False,
                 "message": "I found the appointment but couldn't cancel it. You might not have permission to delete this event.",
-                "error_type": "deletion_failed"
+                "error_type": "deletion_failed",
             }
 
     except Exception as e:
@@ -2187,8 +2591,9 @@ def voice_cancel_appointment(
         return {
             "success": False,
             "message": "I'm having trouble cancelling your appointment right now. Please try again.",
-            "error_type": "cancellation_error"
+            "error_type": "cancellation_error",
         }
+
 
 # Add other endpoints as needed
 
@@ -2196,4 +2601,4 @@ def voice_cancel_appointment(
 if __name__ == "__main__":
     logger.info("Starting Google Calendar MCP Server...")
     # Note: Startup event runs automatically with uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000)

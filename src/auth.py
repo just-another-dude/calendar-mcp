@@ -1,9 +1,7 @@
 import os
-import webbrowser
 import http.server
 import socketserver
 from urllib.parse import urlparse, parse_qs
-import threading
 import logging
 from dotenv import load_dotenv
 from google_auth_oauthlib.flow import InstalledAppFlow
