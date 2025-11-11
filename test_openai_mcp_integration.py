@@ -5,21 +5,25 @@ This simulates how OpenAI will connect to your Calendar MCP server.
 """
 
 import requests
-import json
 import sys
 import os
 from datetime import datetime
 
+
 def test_mcp_with_oauth(base_url: str, oauth_token: str):
     """Test MCP integration with OAuth token (simulating OpenAI)."""
-    print(f"🧪 Testing OpenAI MCP Integration")
+    print("🧪 Testing OpenAI MCP Integration")
     print(f"🌐 Server: {base_url}")
-    print(f"🔑 OAuth Token: {oauth_token[:20]}..." if oauth_token else "❌ No token provided")
+    print(
+        f"🔑 OAuth Token: {oauth_token[:20]}..."
+        if oauth_token
+        else "❌ No token provided"
+    )
     print("=" * 60)
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {oauth_token}"
+        "Authorization": f"Bearer {oauth_token}",
     }
 
     results = []
@@ -31,21 +35,24 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
             "jsonrpc": "2.0",
             "method": "initialize",
             "id": "openai_init",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}}
-            }
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}},
         }
 
-        response = requests.post(f"{base_url}/mcp", json=request, headers=headers, timeout=15)
+        response = requests.post(
+            f"{base_url}/mcp", json=request, headers=headers, timeout=15
+        )
 
         if response.status_code == 200:
             data = response.json()
-            print(f"   ✅ Initialize successful: {data.get('result', {}).get('protocolVersion')}")
+            print(
+                f"   ✅ Initialize successful: {data.get('result', {}).get('protocolVersion')}"
+            )
             results.append(("Initialize", True, data))
         else:
             print(f"   ❌ Initialize failed: {response.status_code} - {response.text}")
-            results.append(("Initialize", False, f"{response.status_code}: {response.text}"))
+            results.append(
+                ("Initialize", False, f"{response.status_code}: {response.text}")
+            )
 
     except Exception as e:
         print(f"   ❌ Initialize error: {e}")
@@ -58,10 +65,12 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
             "jsonrpc": "2.0",
             "method": "tools/list",
             "id": "openai_tools",
-            "params": {}
+            "params": {},
         }
 
-        response = requests.post(f"{base_url}/mcp", json=request, headers=headers, timeout=15)
+        response = requests.post(
+            f"{base_url}/mcp", json=request, headers=headers, timeout=15
+        )
 
         if response.status_code == 200:
             data = response.json()
@@ -71,7 +80,9 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
             results.append(("Tools List", True, f"{len(tools)} tools"))
         else:
             print(f"   ❌ Tools list failed: {response.status_code} - {response.text}")
-            results.append(("Tools List", False, f"{response.status_code}: {response.text}"))
+            results.append(
+                ("Tools List", False, f"{response.status_code}: {response.text}")
+            )
 
     except Exception as e:
         print(f"   ❌ Tools list error: {e}")
@@ -86,14 +97,13 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
             "id": "openai_voice_test",
             "params": {
                 "name": "voice_get_upcoming",
-                "arguments": {
-                    "calendar_id": "primary",
-                    "limit": 3
-                }
-            }
+                "arguments": {"calendar_id": "primary", "limit": 3},
+            },
         }
 
-        response = requests.post(f"{base_url}/mcp", json=request, headers=headers, timeout=15)
+        response = requests.post(
+            f"{base_url}/mcp", json=request, headers=headers, timeout=15
+        )
 
         if response.status_code == 200:
             data = response.json()
@@ -107,7 +117,9 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
                 results.append(("Voice Tool", True, f"{len(content)} items"))
         else:
             print(f"   ❌ Voice tool failed: {response.status_code} - {response.text}")
-            results.append(("Voice Tool", False, f"{response.status_code}: {response.text}"))
+            results.append(
+                ("Voice Tool", False, f"{response.status_code}: {response.text}")
+            )
 
     except Exception as e:
         print(f"   ❌ Voice tool error: {e}")
@@ -120,13 +132,12 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
             "jsonrpc": "2.0",
             "method": "tools/call",
             "id": "openai_calendar_test",
-            "params": {
-                "name": "list_calendars",
-                "arguments": {}
-            }
+            "params": {"name": "list_calendars", "arguments": {}},
         }
 
-        response = requests.post(f"{base_url}/mcp", json=request, headers=headers, timeout=15)
+        response = requests.post(
+            f"{base_url}/mcp", json=request, headers=headers, timeout=15
+        )
 
         if response.status_code == 200:
             data = response.json()
@@ -139,8 +150,12 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
                 print(f"   ✅ Calendar tool successful: {len(content)} response items")
                 results.append(("Calendar Tool", True, f"{len(content)} items"))
         else:
-            print(f"   ❌ Calendar tool failed: {response.status_code} - {response.text}")
-            results.append(("Calendar Tool", False, f"{response.status_code}: {response.text}"))
+            print(
+                f"   ❌ Calendar tool failed: {response.status_code} - {response.text}"
+            )
+            results.append(
+                ("Calendar Tool", False, f"{response.status_code}: {response.text}")
+            )
 
     except Exception as e:
         print(f"   ❌ Calendar tool error: {e}")
@@ -167,9 +182,11 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
         # OpenAI Platform Configuration
         print("\n🤖 OpenAI Platform Configuration:")
         print(f"   MCP Server URL: {base_url}/mcp")
-        print(f"   Protocol: HTTP/JSON-RPC 2.0")
-        print(f"   Authentication: OAuth Bearer Token")
-        print(f"   Available Tools: {len(tools) if 'tools' in locals() else 'Check tools/list response'}")
+        print("   Protocol: HTTP/JSON-RPC 2.0")
+        print("   Authentication: OAuth Bearer Token")
+        print(
+            f"   Available Tools: {len(tools) if 'tools' in locals() else 'Check tools/list response'}"
+        )
 
         return True
     else:
@@ -177,22 +194,31 @@ def test_mcp_with_oauth(base_url: str, oauth_token: str):
         print("Check OAuth token and server configuration.")
         return False
 
+
 def main():
     """Main function."""
     if len(sys.argv) < 2:
-        print("Usage: python test_openai_mcp_integration.py <RAILWAY_URL> [OAUTH_TOKEN]")
-        print("Example: python test_openai_mcp_integration.py https://your-app.railway.app your_oauth_token")
+        print(
+            "Usage: python test_openai_mcp_integration.py <RAILWAY_URL> [OAUTH_TOKEN]"
+        )
+        print(
+            "Example: python test_openai_mcp_integration.py https://your-app.railway.app your_oauth_token"
+        )
         print("\nYou can also set GOOGLE_OAUTH_TOKEN environment variable")
         sys.exit(1)
 
-    base_url = sys.argv[1].rstrip('/')
-    oauth_token = sys.argv[2] if len(sys.argv) > 2 else os.getenv('GOOGLE_OAUTH_TOKEN')
+    base_url = sys.argv[1].rstrip("/")
+    oauth_token = sys.argv[2] if len(sys.argv) > 2 else os.getenv("GOOGLE_OAUTH_TOKEN")
 
     if not oauth_token:
         print("❌ OAuth token required!")
-        print("Either provide it as second argument or set GOOGLE_OAUTH_TOKEN environment variable")
+        print(
+            "Either provide it as second argument or set GOOGLE_OAUTH_TOKEN environment variable"
+        )
         print("\nTo get an OAuth token:")
-        print("1. Go to Google OAuth 2.0 Playground: https://developers.google.com/oauthplayground/")
+        print(
+            "1. Go to Google OAuth 2.0 Playground: https://developers.google.com/oauthplayground/"
+        )
         print("2. Select Google Calendar API v3")
         print("3. Authorize and get access token")
         sys.exit(1)
@@ -217,6 +243,7 @@ def main():
         print("2. Check Google Calendar API permissions")
         print("3. Ensure server OAuth configuration is correct")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

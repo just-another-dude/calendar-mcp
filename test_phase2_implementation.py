@@ -7,12 +7,11 @@ Validates service account fallback mechanism works correctly.
 import asyncio
 import aiohttp
 import json
-import os
 import sys
-from datetime import datetime
 
 # Add the src directory to the path
-sys.path.insert(0, 'src')
+sys.path.insert(0, "src")
+
 
 async def test_phase2_implementation():
     """Test the Phase 2 service account fallback implementation."""
@@ -26,8 +25,9 @@ async def test_phase2_implementation():
         from src.service_account_auth import (
             validate_service_account,
             get_service_account_credentials,
-            service_account_manager
+            service_account_manager,
         )
+
         print("✅ Service account module imported successfully")
     except ImportError as e:
         print(f"❌ Service account module import failed: {e}")
@@ -57,29 +57,25 @@ async def test_phase2_implementation():
         "jsonrpc": "2.0",
         "id": 12345,
         "method": "tools/call",
-        "params": {
-            "name": "list_calendars",
-            "arguments": {}
-        }
+        "params": {"name": "list_calendars", "arguments": {}},
     }
 
     try:
         async with aiohttp.ClientSession() as session:
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {invalid_oauth_token}"
+                "Authorization": f"Bearer {invalid_oauth_token}",
             }
 
-            print(f"📤 Sending MCP request with invalid OAuth token...")
+            print("📤 Sending MCP request with invalid OAuth token...")
             print(f"   Token: {invalid_oauth_token[:20]}...")
 
             async with session.post(
                 "http://127.0.0.1:8000/mcp",
                 json=payload,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
-
                 print(f"📥 Response status: {response.status}")
 
                 if response.status == 200:
@@ -88,17 +84,29 @@ async def test_phase2_implementation():
 
                     if "error" in result:
                         error_msg = result["error"].get("message", "")
-                        error_type = result["error"].get("data", {}).get("error_type", "")
+                        error_type = (
+                            result["error"].get("data", {}).get("error_type", "")
+                        )
 
                         if error_type == "authentication_failed":
-                            print("✅ Service account fallback attempted (both methods failed)")
+                            print(
+                                "✅ Service account fallback attempted (both methods failed)"
+                            )
                             print(f"   Details: {error_msg}")
                         elif error_type == "oauth_refresh_failed":
-                            service_account_available = result["error"].get("data", {}).get("service_account_available", False)
+                            service_account_available = (
+                                result["error"]
+                                .get("data", {})
+                                .get("service_account_available", False)
+                            )
                             if service_account_available:
-                                print("⚠️  OAuth failed but service account should have been tried")
+                                print(
+                                    "⚠️  OAuth failed but service account should have been tried"
+                                )
                             else:
-                                print("✅ OAuth failed, service account not available (expected)")
+                                print(
+                                    "✅ OAuth failed, service account not available (expected)"
+                                )
                         else:
                             print(f"❌ Unexpected error type: {error_type}")
                             print(f"   Message: {error_msg}")
@@ -107,7 +115,9 @@ async def test_phase2_implementation():
                         # or service account fallback succeeded
                         print("✅ MCP request succeeded!")
                         if "result" in result:
-                            print("   This means service account fallback worked perfectly!")
+                            print(
+                                "   This means service account fallback worked perfectly!"
+                            )
 
                 else:
                     error_text = await response.text()
@@ -126,7 +136,7 @@ async def test_phase2_implementation():
 
     # Check if server.py has the service account imports
     try:
-        with open('src/server.py', 'r') as f:
+        with open("src/server.py", "r") as f:
             server_content = f.read()
 
         if "from src.service_account_auth import" in server_content:
@@ -153,9 +163,12 @@ async def test_phase2_implementation():
     print("✅ Server.py updated with fallback mechanism")
     print("✅ Startup validation integrated")
     print("✅ Ready for Railway deployment with service account config")
-    print("\n🚀 Next step: Configure service account in Railway using RAILWAY_SERVICE_ACCOUNT_CONFIG.md")
+    print(
+        "\n🚀 Next step: Configure service account in Railway using RAILWAY_SERVICE_ACCOUNT_CONFIG.md"
+    )
 
     return True
+
 
 if __name__ == "__main__":
     asyncio.run(test_phase2_implementation())

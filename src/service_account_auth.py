@@ -13,13 +13,16 @@ from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
+
 class ServiceAccountManager:
     """Manages Google Service Account authentication for Calendar API access."""
 
     def __init__(self):
-        self.service_account_file = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE', 'service-account-key.json')
-        self.service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
-        self.scopes = ['https://www.googleapis.com/auth/calendar']
+        self.service_account_file = os.getenv(
+            "GOOGLE_SERVICE_ACCOUNT_FILE", "service-account-key.json"
+        )
+        self.service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+        self.scopes = ["https://www.googleapis.com/auth/calendar"]
         self._cached_credentials: Optional[service_account.Credentials] = None
 
     def load_service_account_credentials(self) -> Optional[service_account.Credentials]:
@@ -28,7 +31,9 @@ class ServiceAccountManager:
         try:
             # Try loading from environment variable first (Railway deployment)
             if self.service_account_json:
-                logger.info("🔐 Loading service account credentials from environment variable")
+                logger.info(
+                    "🔐 Loading service account credentials from environment variable"
+                )
                 service_account_info = json.loads(self.service_account_json)
                 credentials = service_account.Credentials.from_service_account_info(
                     service_account_info, scopes=self.scopes
@@ -38,7 +43,9 @@ class ServiceAccountManager:
 
             # Try loading from file (local development)
             elif os.path.exists(self.service_account_file):
-                logger.info(f"🔐 Loading service account credentials from file: {self.service_account_file}")
+                logger.info(
+                    f"🔐 Loading service account credentials from file: {self.service_account_file}"
+                )
                 credentials = service_account.Credentials.from_service_account_file(
                     self.service_account_file, scopes=self.scopes
                 )
@@ -47,8 +54,12 @@ class ServiceAccountManager:
 
             else:
                 logger.warning("❌ No service account credentials found")
-                logger.info(f"   - Environment variable GOOGLE_SERVICE_ACCOUNT_JSON: {'Set' if self.service_account_json else 'Not set'}")
-                logger.info(f"   - Service account file {self.service_account_file}: {'Found' if os.path.exists(self.service_account_file) else 'Not found'}")
+                logger.info(
+                    f"   - Environment variable GOOGLE_SERVICE_ACCOUNT_JSON: {'Set' if self.service_account_json else 'Not set'}"
+                )
+                logger.info(
+                    f"   - Service account file {self.service_account_file}: {'Found' if os.path.exists(self.service_account_file) else 'Not found'}"
+                )
                 return None
 
         except json.JSONDecodeError as e:
@@ -84,12 +95,16 @@ class ServiceAccountManager:
         self._cached_credentials = credentials
         return credentials
 
-    def impersonate_user(self, user_email: str) -> Optional[service_account.Credentials]:
+    def impersonate_user(
+        self, user_email: str
+    ) -> Optional[service_account.Credentials]:
         """Create impersonated credentials for a specific user (requires domain-wide delegation)."""
 
         base_credentials = self.get_service_account_credentials()
         if not base_credentials:
-            logger.error("❌ Cannot impersonate user: no service account credentials available")
+            logger.error(
+                "❌ Cannot impersonate user: no service account credentials available"
+            )
             return None
 
         try:
@@ -100,15 +115,23 @@ class ServiceAccountManager:
             if not impersonated_credentials.valid:
                 impersonated_credentials.refresh(Request())
 
-            logger.info(f"✅ Successfully created impersonated credentials for {user_email}")
+            logger.info(
+                f"✅ Successfully created impersonated credentials for {user_email}"
+            )
             return impersonated_credentials
 
         except Exception as e:
-            logger.error(f"❌ Failed to create impersonated credentials for {user_email}: {e}")
-            logger.warning("   This usually means domain-wide delegation is not configured correctly")
+            logger.error(
+                f"❌ Failed to create impersonated credentials for {user_email}: {e}"
+            )
+            logger.warning(
+                "   This usually means domain-wide delegation is not configured correctly"
+            )
             return None
 
-    def create_calendar_service(self, user_email: Optional[str] = None) -> Optional[Any]:
+    def create_calendar_service(
+        self, user_email: Optional[str] = None
+    ) -> Optional[Any]:
         """Create a Google Calendar service client using service account authentication."""
 
         try:
@@ -116,17 +139,21 @@ class ServiceAccountManager:
                 # Use domain-wide delegation to impersonate the user
                 credentials = self.impersonate_user(user_email)
                 if not credentials:
-                    logger.error(f"❌ Cannot create calendar service: failed to impersonate {user_email}")
+                    logger.error(
+                        f"❌ Cannot create calendar service: failed to impersonate {user_email}"
+                    )
                     return None
             else:
                 # Use service account directly (for service account's own calendar)
                 credentials = self.get_service_account_credentials()
                 if not credentials:
-                    logger.error("❌ Cannot create calendar service: no service account credentials")
+                    logger.error(
+                        "❌ Cannot create calendar service: no service account credentials"
+                    )
                     return None
 
             logger.info("🗓️ Creating Google Calendar service...")
-            service = build('calendar', 'v3', credentials=credentials)
+            service = build("calendar", "v3", credentials=credentials)
             logger.info("✅ Google Calendar service created successfully")
             return service
 
@@ -141,7 +168,7 @@ class ServiceAccountManager:
             "service_account_available": False,
             "credentials_valid": False,
             "calendar_service_working": False,
-            "details": {}
+            "details": {},
         }
 
         # Check if service account credentials are available
@@ -165,11 +192,13 @@ class ServiceAccountManager:
             # Test calendar service creation
             if diagnostic_info["credentials_valid"]:
                 try:
-                    service = build('calendar', 'v3', credentials=credentials)
+                    service = build("calendar", "v3", credentials=credentials)
                     # Try a simple API call to verify it works
                     calendar_list = service.calendarList().list(maxResults=1).execute()
                     diagnostic_info["calendar_service_working"] = True
-                    diagnostic_info["details"]["calendar_count"] = len(calendar_list.get('items', []))
+                    diagnostic_info["details"]["calendar_count"] = len(
+                        calendar_list.get("items", [])
+                    )
                 except Exception as service_error:
                     diagnostic_info["details"]["service_error"] = str(service_error)
         else:
@@ -177,20 +206,25 @@ class ServiceAccountManager:
 
         return diagnostic_info
 
+
 # Global service account manager instance
 service_account_manager = ServiceAccountManager()
+
 
 def get_service_account_credentials() -> Optional[service_account.Credentials]:
     """Get valid service account credentials for Calendar API access."""
     return service_account_manager.get_service_account_credentials()
 
+
 def create_calendar_service_for_user(user_email: str) -> Optional[Any]:
     """Create a Calendar service for a specific user using domain-wide delegation."""
     return service_account_manager.create_calendar_service(user_email)
 
+
 def create_calendar_service() -> Optional[Any]:
     """Create a Calendar service using service account credentials."""
     return service_account_manager.create_calendar_service()
+
 
 def validate_service_account() -> Dict[str, Any]:
     """Validate service account setup and return diagnostic information."""

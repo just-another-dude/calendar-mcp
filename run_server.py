@@ -2,64 +2,66 @@ import uvicorn
 import os
 import sys
 import logging
-import logging.config # Import logging config
+import logging.config  # Import logging config
 import threading
 from dotenv import load_dotenv
 
-# --- Centralized Logging Configuration --- 
+# --- Centralized Logging Configuration ---
 # Get project directory for absolute log path
 project_dir_for_log = os.path.dirname(os.path.abspath(__file__))
-log_file_path = os.path.join(project_dir_for_log, 'calendar_mcp.log')
+log_file_path = os.path.join(project_dir_for_log, "calendar_mcp.log")
 
 # Define the logging configuration dictionary
-LOGGING_CONFIG = { 
-    'version': 1,
-    'disable_existing_loggers': False, # Let FastAPI/Uvicorn use this config
-    'formatters': { 
-        'default': { 
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,  # Let FastAPI/Uvicorn use this config
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         },
     },
-    'handlers': { 
-        'default': { # Console handler (used when not in MCP mode)
-            'formatter': 'default',
-            'class': 'logging.StreamHandler',
-            'stream': 'ext://sys.stderr',
+    "handlers": {
+        "default": {  # Console handler (used when not in MCP mode)
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
         },
-        'file': { # File handler (always used)
-            'formatter': 'default',
-            'class': 'logging.FileHandler',
-            'filename': log_file_path, # Use absolute path
-            'mode': 'a', # Append mode
+        "file": {  # File handler (always used)
+            "formatter": "default",
+            "class": "logging.FileHandler",
+            "filename": log_file_path,  # Use absolute path
+            "mode": "a",  # Append mode
         },
     },
-    'loggers': { 
-        '': { # Root logger
-            'handlers': ['default', 'file'], # Start with both
-            'level': 'INFO',
+    "loggers": {
+        "": {  # Root logger
+            "handlers": ["default", "file"],  # Start with both
+            "level": "INFO",
         },
-        'uvicorn.error': { 
-            'level': 'INFO', # Capture uvicorn errors
-            'handlers': ['default', 'file'],
-            'propagate': False,
+        "uvicorn.error": {
+            "level": "INFO",  # Capture uvicorn errors
+            "handlers": ["default", "file"],
+            "propagate": False,
         },
-        'uvicorn.access': { 
-            'level': 'WARNING', # Reduce access log noise if desired
-            'handlers': ['default', 'file'],
-            'propagate': False,
+        "uvicorn.access": {
+            "level": "WARNING",  # Reduce access log noise if desired
+            "handlers": ["default", "file"],
+            "propagate": False,
         },
-    }
-} 
+    },
+}
 
-# --- Force Reset Existing Handlers --- 
+# --- Force Reset Existing Handlers ---
 # Get the root logger
 root_logger_for_reset = logging.getLogger()
 # Remove all existing handlers
 if root_logger_for_reset.hasHandlers():
-    for handler in root_logger_for_reset.handlers[:]: # Iterate over a copy
+    for handler in root_logger_for_reset.handlers[:]:  # Iterate over a copy
         root_logger_for_reset.removeHandler(handler)
-        handler.close() # Close the handler properly
-    print("Log Reset: Removed existing handlers.") # Use print as logger not configured yet
+        handler.close()  # Close the handler properly
+    print(
+        "Log Reset: Removed existing handlers."
+    )  # Use print as logger not configured yet
 # --- End Force Reset ---
 
 # Apply the configuration
@@ -67,8 +69,9 @@ logging.config.dictConfig(LOGGING_CONFIG)
 
 # Get the root logger AFTER configuration
 logger = logging.getLogger(__name__)
-logger.info(f"Logging configured. Log file path: {log_file_path}") # Log the path
+logger.info(f"Logging configured. Log file path: {log_file_path}")  # Log the path
 # --- End Logging Configuration ---
+
 
 # Function to run the MCP server in a separate thread
 def run_mcp_server():
@@ -78,23 +81,25 @@ def run_mcp_server():
     for handler in root_logger.handlers:
         if isinstance(handler, logging.StreamHandler):
             handler_to_remove = handler
-            break # Found the console handler, stop looking
+            break  # Found the console handler, stop looking
 
     if handler_to_remove:
         logger.info(f"MCP Mode: Removing console handler {handler_to_remove}")
         root_logger.removeHandler(handler_to_remove)
     else:
         logger.warning("MCP Mode: Console handler (StreamHandler) not found to remove.")
-        
+
     # Import and run MCP server
     from src.mcp_bridge import create_mcp_server
+
     mcp = create_mcp_server()
     logger.info("Starting MCP server with stdio transport")
     try:
-        mcp.run(transport='stdio')
+        mcp.run(transport="stdio")
     except Exception as e:
         logger.error(f"MCP server thread failed: {e}", exc_info=True)
         # Handle the error appropriately, maybe signal the main thread
+
 
 if __name__ == "__main__":
     # Add the current directory to the Python path
@@ -102,12 +107,14 @@ if __name__ == "__main__":
     if project_dir not in sys.path:
         sys.path.insert(0, project_dir)
         # Logger might not be fully configured here yet if run as main script initially
-        # print(f"Added {project_dir} to Python path") 
-    
+        # print(f"Added {project_dir} to Python path")
+
     # Force PYTHONPATH for reloader (remains important)
-    os.environ["PYTHONPATH"] = f"{project_dir}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
+    os.environ["PYTHONPATH"] = (
+        f"{project_dir}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
+    )
     logger.info(f"Set PYTHONPATH to include {project_dir}")
-    
+
     # Load environment variables
     load_dotenv()
 
@@ -121,11 +128,15 @@ if __name__ == "__main__":
         logger.info("Running in HTTP-only mode (stdin is a TTY)")
         # Ensure console handler is present if we started in HTTP mode
         root_logger = logging.getLogger()
-        has_console = any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers)
+        has_console = any(
+            isinstance(h, logging.StreamHandler) for h in root_logger.handlers
+        )
         if not has_console:
             logger.warning("Console handler missing in HTTP mode, adding default.")
             console_handler = logging.StreamHandler(sys.stderr)
-            console_handler.setFormatter(logging.Formatter(LOGGING_CONFIG['formatters']['default']['format']))
+            console_handler.setFormatter(
+                logging.Formatter(LOGGING_CONFIG["formatters"]["default"]["format"])
+            )
             root_logger.addHandler(console_handler)
 
     # FastAPI/Uvicorn settings with Railway optimizations
@@ -167,13 +178,15 @@ if __name__ == "__main__":
 
         # Additional production optimizations for Railway
         if is_railway:
-            uvicorn_config.update({
-                "workers": 1,  # Railway container limitations
-                "timeout_keep_alive": 120,  # Keep connections alive longer
-                "timeout_graceful_shutdown": 30,  # Graceful shutdown time
-                "limit_max_requests": 1000,  # Restart worker after N requests
-                "limit_concurrency": 100,  # Max concurrent connections
-            })
+            uvicorn_config.update(
+                {
+                    "workers": 1,  # Railway container limitations
+                    "timeout_keep_alive": 120,  # Keep connections alive longer
+                    "timeout_graceful_shutdown": 30,  # Graceful shutdown time
+                    "limit_max_requests": 1000,  # Restart worker after N requests
+                    "limit_concurrency": 100,  # Max concurrent connections
+                }
+            )
             logger.info("Applied Railway production optimizations")
 
         uvicorn.run(**uvicorn_config)
@@ -181,5 +194,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Error starting FastAPI server: {e}", exc_info=True)
         if is_railway:
-            logger.error("Railway deployment failed - check environment variables and configuration")
-        sys.exit(1) 
+            logger.error(
+                "Railway deployment failed - check environment variables and configuration"
+            )
+        sys.exit(1)

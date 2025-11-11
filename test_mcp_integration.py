@@ -7,13 +7,12 @@ This script tests the MCP protocol implementation and OAuth token handling.
 import requests
 import json
 import sys
-import os
-from datetime import datetime
+
 
 class MCPTester:
     def __init__(self, server_url, oauth_token):
         """Initialize MCP tester with server URL and OAuth token."""
-        self.server_url = server_url.rstrip('/')
+        self.server_url = server_url.rstrip("/")
         self.oauth_token = oauth_token
         self.mcp_url = f"{self.server_url}/mcp"
         self.test_url = f"{self.server_url}/test/mcp"
@@ -39,20 +38,22 @@ class MCPTester:
         try:
             payload = {
                 "test_oauth_token": self.oauth_token,
-                "test_tool": "list_calendars"
+                "test_tool": "list_calendars",
             }
 
             response = requests.post(
                 self.test_url,
                 json=payload,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
             )
 
             if response.status_code == 200:
                 result = response.json()
                 if result.get("status") == "success":
                     print("✅ MCP implementation test passed")
-                    print(f"   OpenAI integration ready: {result.get('openai_integration_ready')}")
+                    print(
+                        f"   OpenAI integration ready: {result.get('openai_integration_ready')}"
+                    )
                     return True
                 else:
                     print(f"❌ MCP implementation test failed: {result.get('message')}")
@@ -77,8 +78,8 @@ class MCPTester:
                     "jsonrpc": "2.0",
                     "method": "initialize",
                     "id": "test_init",
-                    "params": {}
-                }
+                    "params": {},
+                },
             },
             {
                 "name": "List Tools",
@@ -86,8 +87,8 @@ class MCPTester:
                     "jsonrpc": "2.0",
                     "method": "tools/list",
                     "id": "test_tools",
-                    "params": {}
-                }
+                    "params": {},
+                },
             },
             {
                 "name": "Call Voice Tool",
@@ -95,12 +96,9 @@ class MCPTester:
                     "jsonrpc": "2.0",
                     "method": "tools/call",
                     "id": "test_voice",
-                    "params": {
-                        "name": "voice_get_upcoming",
-                        "arguments": {"limit": 3}
-                    }
-                }
-            }
+                    "params": {"name": "voice_get_upcoming", "arguments": {"limit": 3}},
+                },
+            },
         ]
 
         all_passed = True
@@ -112,14 +110,16 @@ class MCPTester:
                     json=test["request"],
                     headers={
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.oauth_token}"
-                    }
+                        "Authorization": f"Bearer {self.oauth_token}",
+                    },
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     if "error" in result:
-                        print(f"   ❌ {test['name']} failed: {result['error']['message']}")
+                        print(
+                            f"   ❌ {test['name']} failed: {result['error']['message']}"
+                        )
                         all_passed = False
                     else:
                         print(f"   ✅ {test['name']} passed")
@@ -140,12 +140,9 @@ class MCPTester:
         voice_tests = [
             {
                 "tool": "voice_check_availability",
-                "args": {"time_request": "tomorrow afternoon"}
+                "args": {"time_request": "tomorrow afternoon"},
             },
-            {
-                "tool": "voice_get_upcoming",
-                "args": {"limit": 5}
-            }
+            {"tool": "voice_get_upcoming", "args": {"limit": 5}},
         ]
 
         all_passed = True
@@ -156,10 +153,7 @@ class MCPTester:
                     "jsonrpc": "2.0",
                     "method": "tools/call",
                     "id": f"test_{test['tool']}",
-                    "params": {
-                        "name": test['tool'],
-                        "arguments": test['args']
-                    }
+                    "params": {"name": test["tool"], "arguments": test["args"]},
                 }
 
                 response = requests.post(
@@ -167,14 +161,16 @@ class MCPTester:
                     json=request,
                     headers={
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.oauth_token}"
-                    }
+                        "Authorization": f"Bearer {self.oauth_token}",
+                    },
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     if "error" in result:
-                        print(f"   ❌ {test['tool']} failed: {result['error']['message']}")
+                        print(
+                            f"   ❌ {test['tool']} failed: {result['error']['message']}"
+                        )
                         all_passed = False
                     else:
                         # Check if result contains voice-friendly response
@@ -184,8 +180,12 @@ class MCPTester:
                             try:
                                 parsed = json.loads(text)
                                 if "message" in parsed:
-                                    print(f"   ✅ {test['tool']} passed with voice response")
-                                    print(f"      Message: {parsed['message'][:100]}...")
+                                    print(
+                                        f"   ✅ {test['tool']} passed with voice response"
+                                    )
+                                    print(
+                                        f"      Message: {parsed['message'][:100]}..."
+                                    )
                                 else:
                                     print(f"   ✅ {test['tool']} passed")
                             except json.JSONDecodeError:
@@ -211,7 +211,7 @@ class MCPTester:
             ("Server Health", self.test_health),
             ("MCP Implementation", self.test_mcp_implementation),
             ("MCP Protocol", self.test_mcp_protocol),
-            ("Voice Tools", self.test_voice_tools)
+            ("Voice Tools", self.test_voice_tools),
         ]
 
         results = {}
@@ -238,22 +238,27 @@ class MCPTester:
             print("Your MCP server is ready for OpenAI integration!")
         else:
             print("⚠️  SOME TESTS FAILED")
-            print("Please check the error messages above and fix issues before OpenAI integration.")
+            print(
+                "Please check the error messages above and fix issues before OpenAI integration."
+            )
 
         return all_passed
+
 
 def main():
     """Main function to run MCP tests."""
     if len(sys.argv) != 3:
         print("Usage: python test_mcp_integration.py <server_url> <oauth_token>")
-        print("Example: python test_mcp_integration.py https://your-app.railway.app ya29.a0...")
+        print(
+            "Example: python test_mcp_integration.py https://your-app.railway.app ya29.a0..."
+        )
         sys.exit(1)
 
     server_url = sys.argv[1]
     oauth_token = sys.argv[2]
 
     # Validate inputs
-    if not server_url.startswith(('http://', 'https://')):
+    if not server_url.startswith(("http://", "https://")):
         print("❌ Server URL must start with http:// or https://")
         sys.exit(1)
 
@@ -275,6 +280,7 @@ def main():
     else:
         print("\n🔧 Fix the issues above and run the test again.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

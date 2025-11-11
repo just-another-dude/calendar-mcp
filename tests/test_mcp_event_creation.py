@@ -9,7 +9,7 @@ correctly in the server context.
 import pytest
 import sys
 import os
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from datetime import datetime
 
 # Add the parent directory to the path to ensure imports work
@@ -17,7 +17,10 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from src.mcp_utils import mcp_params_to_event_create_request, mcp_params_to_event_update_request
+from src.mcp_utils import (
+    mcp_params_to_event_create_request,
+    mcp_params_to_event_update_request,
+)
 from src.models import EventCreateRequest, EventUpdateRequest, EventDateTime
 
 
@@ -33,15 +36,15 @@ class TestMcpEventCreationIntegration:
             "end_time": "2025-11-02T15:00:00",
             "description": "Test description",
             "location": "Test location",
-            "attendee_emails": ["test@example.com"]
+            "attendee_emails": ["test@example.com"],
         }
 
         self.hebrew_mcp_arguments = {
             "calendar_id": "primary",
-            "summary": "פגישה עם ד\"ר קליין",
+            "summary": 'פגישה עם ד"ר קליין',
             "start_time": "2025-11-03T10:00:00",
             "end_time": "2025-11-03T11:00:00",
-            "description": "פגישה חשובה"
+            "description": "פגישה חשובה",
         }
 
     def test_mcp_params_conversion_for_calendar_actions(self):
@@ -73,22 +76,22 @@ class TestMcpEventCreationIntegration:
         event_data = mcp_params_to_event_create_request(self.hebrew_mcp_arguments)
 
         assert isinstance(event_data, EventCreateRequest)
-        assert event_data.summary == "פגישה עם ד\"ר קליין"
+        assert event_data.summary == 'פגישה עם ד"ר קליין'
         assert event_data.description == "פגישה חשובה"
 
         # Verify the model can be serialized (important for JSON-RPC responses)
         serialized = event_data.model_dump()
-        assert serialized["summary"] == "פגישה עם ד\"ר קליין"
+        assert serialized["summary"] == 'פגישה עם ד"ר קליין'
         assert serialized["description"] == "פגישה חשובה"
 
-    @patch('src.calendar_actions.create_event')
+    @patch("src.calendar_actions.create_event")
     def test_mcp_server_handler_simulation(self, mock_create_event):
         """Test simulating the MCP server handler with proper Pydantic conversion."""
         # Mock successful calendar_actions response
         mock_create_event.return_value = {
             "success": True,
             "event_id": "test_event_123",
-            "html_link": "https://calendar.google.com/event?eid=test"
+            "html_link": "https://calendar.google.com/event?eid=test",
         }
 
         # Simulate the fixed MCP handler logic
@@ -103,7 +106,7 @@ class TestMcpEventCreationIntegration:
             result = mock_create_event(
                 credentials=mock_creds,
                 calendar_id=self.sample_mcp_arguments["calendar_id"],
-                event_data=event_data  # Now a proper EventCreateRequest object
+                event_data=event_data,  # Now a proper EventCreateRequest object
             )
 
             # Verify the call was successful
@@ -127,7 +130,7 @@ class TestMcpEventCreationIntegration:
         update_arguments = {
             "summary": "Updated Meeting Title",
             "start_time": "2025-11-02T16:00:00",
-            "description": "Updated description"
+            "description": "Updated description",
         }
 
         # Convert to EventUpdateRequest
@@ -147,7 +150,7 @@ class TestMcpEventCreationIntegration:
             "calendar_id": "primary",
             "summary": "Minimal Meeting",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         event_data = mcp_params_to_event_create_request(minimal_arguments)
@@ -161,10 +164,10 @@ class TestMcpEventCreationIntegration:
     def test_datetime_formats_compatibility(self):
         """Test various datetime formats that might come from the voice-agent client."""
         datetime_formats = [
-            "2025-11-02T14:00:00",           # Basic ISO
-            "2025-11-02T14:00:00Z",          # UTC timezone
-            "2025-11-02T14:00:00+02:00",     # Positive timezone
-            "2025-11-02T14:00:00-05:00",     # Negative timezone
+            "2025-11-02T14:00:00",  # Basic ISO
+            "2025-11-02T14:00:00Z",  # UTC timezone
+            "2025-11-02T14:00:00+02:00",  # Positive timezone
+            "2025-11-02T14:00:00-05:00",  # Negative timezone
         ]
 
         for dt_format in datetime_formats:
@@ -172,7 +175,7 @@ class TestMcpEventCreationIntegration:
                 "calendar_id": "primary",
                 "summary": f"Test {dt_format}",
                 "start_time": dt_format,
-                "end_time": dt_format  # Same format for end time
+                "end_time": dt_format,  # Same format for end time
             }
 
             # This should not raise an exception
@@ -197,7 +200,7 @@ class TestMcpEventCreationIntegration:
             "calendar_id": "primary",
             "summary": "Test Meeting",
             "start_time": "invalid-datetime-format",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         with pytest.raises(ValueError, match="Error creating EventCreateRequest"):
@@ -216,32 +219,32 @@ class TestMcpEventCreationIntegration:
         valid_model = EventCreateRequest(
             summary="Valid Meeting",
             start=EventDateTime(dateTime=datetime(2025, 11, 2, 14, 0)),
-            end=EventDateTime(dateTime=datetime(2025, 11, 2, 15, 0))
+            end=EventDateTime(dateTime=datetime(2025, 11, 2, 15, 0)),
         )
         assert valid_model.summary == "Valid Meeting"
 
-    @patch('src.calendar_actions.create_event')
-    @patch('src.calendar_actions.update_event')
+    @patch("src.calendar_actions.create_event")
+    @patch("src.calendar_actions.update_event")
     def test_full_mcp_workflow_simulation(self, mock_update_event, mock_create_event):
         """Test the complete workflow of create and update operations."""
         # Mock responses
         mock_create_event.return_value = {
             "success": True,
-            "event_id": "created_event_123"
+            "event_id": "created_event_123",
         }
         mock_update_event.return_value = {
             "success": True,
-            "event_id": "created_event_123"
+            "event_id": "created_event_123",
         }
 
         # Step 1: Create event
-        create_event_data = mcp_params_to_event_create_request(self.sample_mcp_arguments)
+        create_event_data = mcp_params_to_event_create_request(
+            self.sample_mcp_arguments
+        )
         mock_creds = Mock()
 
         create_result = mock_create_event(
-            credentials=mock_creds,
-            calendar_id="primary",
-            event_data=create_event_data
+            credentials=mock_creds, calendar_id="primary", event_data=create_event_data
         )
 
         assert create_result["success"] is True
@@ -250,7 +253,7 @@ class TestMcpEventCreationIntegration:
         # Step 2: Update event
         update_arguments = {
             "summary": "Updated Meeting Title",
-            "description": "Updated description"
+            "description": "Updated description",
         }
         update_event_data = mcp_params_to_event_update_request(update_arguments)
 
@@ -258,7 +261,7 @@ class TestMcpEventCreationIntegration:
             credentials=mock_creds,
             calendar_id="primary",
             event_id=event_id,
-            event_data=update_event_data
+            event_data=update_event_data,
         )
 
         assert update_result["success"] is True
@@ -288,22 +291,24 @@ class TestMcpErrorScenarios:
         except ValueError as e:
             error_response = {
                 "success": False,
-                "error": f"Parameter conversion error: {str(e)}"
+                "error": f"Parameter conversion error: {str(e)}",
             }
             assert error_response["success"] is False
             assert "Parameter conversion error" in error_response["error"]
 
         # Datetime parsing error
         try:
-            mcp_params_to_event_create_request({
-                "summary": "Test",
-                "start_time": "invalid",
-                "end_time": "2025-11-02T15:00:00"
-            })
+            mcp_params_to_event_create_request(
+                {
+                    "summary": "Test",
+                    "start_time": "invalid",
+                    "end_time": "2025-11-02T15:00:00",
+                }
+            )
         except ValueError as e:
             error_response = {
                 "success": False,
-                "error": f"Parameter conversion error: {str(e)}"
+                "error": f"Parameter conversion error: {str(e)}",
             }
             assert error_response["success"] is False
             assert "Parameter conversion error" in error_response["error"]
@@ -316,7 +321,7 @@ class TestMcpErrorScenarios:
             "start_time": "2025-11-02T14:00:00",
             "end_time": "2025-11-02T15:00:00",
             "description": "Unicode test: áéíóú ñ 中文 العربية עברית",
-            "location": "Café São Paulo"
+            "location": "Café São Paulo",
         }
 
         # Should handle Unicode characters correctly

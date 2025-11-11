@@ -9,17 +9,20 @@ import sys
 import subprocess
 from pathlib import Path
 
+
 def print_header(title):
     """Print a formatted header."""
     print("\n" + "=" * 60)
     print(f"🚀 {title}")
     print("=" * 60)
 
+
 def print_step(step_num, title, description=""):
     """Print a formatted step."""
     print(f"\n{step_num}️⃣ {title}")
     if description:
         print(f"   {description}")
+
 
 def check_environment():
     """Check if environment is set up correctly."""
@@ -53,22 +56,24 @@ TOKEN_FILE_PATH=.gcp-saved-tokens.json
 
     # Check if credentials are configured
     from dotenv import load_dotenv
+
     load_dotenv()
 
-    client_id = os.getenv('GOOGLE_CLIENT_ID')
-    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
-    if not client_id or client_id == 'your_client_id_here':
+    if not client_id or client_id == "your_client_id_here":
         print("❌ GOOGLE_CLIENT_ID not configured in .env")
         return False
 
-    if not client_secret or client_secret == 'your_client_secret_here':
+    if not client_secret or client_secret == "your_client_secret_here":
         print("❌ GOOGLE_CLIENT_SECRET not configured in .env")
         return False
 
-    print(f"✅ OAuth credentials configured")
+    print("✅ OAuth credentials configured")
     print(f"   Client ID: {client_id[:20]}...")
     return True
+
 
 def setup_google_oauth():
     """Guide user through Google OAuth setup."""
@@ -95,6 +100,7 @@ def setup_google_oauth():
 
     input("\n📝 Press Enter when you've completed the Google Cloud Console setup...")
 
+
 def generate_production_token():
     """Generate production token for OpenAI Platform."""
     print_header("Generate Production Token")
@@ -103,8 +109,9 @@ def generate_production_token():
 
     try:
         # Run the token generation script
-        result = subprocess.run([sys.executable, "get_openai_token.py"],
-                              capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "get_openai_token.py"], capture_output=True, text=True
+        )
 
         if result.returncode == 0:
             print("✅ Token generation completed successfully!")
@@ -119,6 +126,7 @@ def generate_production_token():
     except Exception as e:
         print(f"❌ Error running token generator: {e}")
         return False
+
 
 def test_deployment():
     """Test the Railway deployment."""
@@ -150,6 +158,7 @@ def test_deployment():
     except Exception as e:
         print(f"❌ Deployment test failed: {e}")
         return False
+
 
 def deploy_updates():
     """Deploy updates to Railway."""
@@ -192,6 +201,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"""
         print(f"❌ Deployment failed: {e}")
         return False
 
+
 def show_openai_setup_guide():
     """Show the final OpenAI Platform setup guide."""
     print_header("OpenAI Platform Setup Guide")
@@ -216,6 +226,7 @@ def show_openai_setup_guide():
     print("   Token Status: https://mcp.dipmedia.ai/token-status")
     print("   Health Check: https://mcp.dipmedia.ai/health")
     print("   API Docs: https://mcp.dipmedia.ai/docs")
+
 
 def main():
     """Main setup function."""
@@ -261,6 +272,7 @@ def main():
     else:
         print_header("Setup Issues Detected")
         print("Some steps failed. Please review the errors above and retry.")
+
 
 if __name__ == "__main__":
     main()

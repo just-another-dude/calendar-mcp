@@ -8,7 +8,6 @@ import uvicorn
 import os
 import sys
 import logging
-import threading
 from dotenv import load_dotenv
 
 # Add the current directory to the Python path
@@ -18,10 +17,10 @@ if project_dir not in sys.path:
 
 # Configure logging for Railway
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 
 def main():
     """Main function to start the server."""
@@ -53,13 +52,8 @@ def main():
     logger.info(f"Reload mode: {'Enabled' if reload else 'Disabled'}")
 
     # Start the FastAPI server
-    uvicorn.run(
-        "src.server:app",
-        host=host,
-        port=port,
-        reload=reload,
-        access_log=True
-    )
+    uvicorn.run("src.server:app", host=host, port=port, reload=reload, access_log=True)
+
 
 if __name__ == "__main__":
     main()

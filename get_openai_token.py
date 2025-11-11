@@ -8,7 +8,7 @@ that can be automatically refreshed by the MCP server.
 import os
 import sys
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Add the current directory to the Python path
@@ -17,6 +17,7 @@ if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
 from src.auth import get_credentials
+
 
 def get_production_token():
     """Get a production-ready OAuth token for OpenAI Platform."""
@@ -27,8 +28,8 @@ def get_production_token():
     load_dotenv()
 
     # Check required environment variables
-    client_id = os.getenv('GOOGLE_CLIENT_ID')
-    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
     if not client_id or not client_secret:
         print("❌ Missing Google OAuth credentials!")
@@ -41,7 +42,7 @@ def get_production_token():
         print("3. Create OAuth 2.0 Client ID")
         return None
 
-    print(f"✅ Found OAuth credentials")
+    print("✅ Found OAuth credentials")
     print(f"   Client ID: {client_id[:20]}...")
     print(f"   Client Secret: {client_secret[:10]}...")
 
@@ -65,12 +66,12 @@ def get_production_token():
         print("🎯 OPENAI PLATFORM CONFIGURATION")
         print("=" * 60)
 
-        print(f"\n📋 MCP Server Settings:")
-        print(f"   Server URL: https://mcp.dipmedia.ai/mcp")
-        print(f"   Protocol: HTTP/JSON-RPC 2.0")
-        print(f"   Authentication: Bearer Token")
+        print("\n📋 MCP Server Settings:")
+        print("   Server URL: https://mcp.dipmedia.ai/mcp")
+        print("   Protocol: HTTP/JSON-RPC 2.0")
+        print("   Authentication: Bearer Token")
 
-        print(f"\n🔑 Access Token (for OpenAI Platform):")
+        print("\n🔑 Access Token (for OpenAI Platform):")
         print(f"   {access_token}")
 
         if expires_at:
@@ -83,10 +84,10 @@ def get_production_token():
                 print("   ⚠️  Token has expired")
 
         if refresh_token:
-            print(f"\n🔄 Refresh Token Available: ✅")
+            print("\n🔄 Refresh Token Available: ✅")
             print("   The MCP server can automatically refresh this token")
         else:
-            print(f"\n🔄 Refresh Token Available: ❌")
+            print("\n🔄 Refresh Token Available: ❌")
             print("   ⚠️  You may need to re-authenticate when token expires")
 
         # Save token info for the server
@@ -97,11 +98,11 @@ def get_production_token():
             "client_id": client_id,
             "client_secret": client_secret,
             "created_for": "openai-platform",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
 
         token_file = "openai_platform_token.json"
-        with open(token_file, 'w') as f:
+        with open(token_file, "w") as f:
             json.dump(token_info, f, indent=2)
 
         print(f"\n💾 Token info saved to: {token_file}")
@@ -114,14 +115,14 @@ def get_production_token():
         print("3. Set MCP Server URL to: https://mcp.dipmedia.ai/mcp")
         print("4. Test your voice assistant!")
 
-        print(f"\n⏳ Token Validity:")
+        print("\n⏳ Token Validity:")
         if expires_at:
             if time_left.total_seconds() > 3600:  # More than 1 hour
                 print(f"   ✅ Good for {hours_left:.1f} hours")
             else:
-                print(f"   ⚠️  Expires soon - consider refreshing")
+                print("   ⚠️  Expires soon - consider refreshing")
 
-        print(f"\n🔄 Auto-Refresh:")
+        print("\n🔄 Auto-Refresh:")
         if refresh_token:
             print("   ✅ Enabled - token will refresh automatically")
         else:
@@ -131,12 +132,13 @@ def get_production_token():
             "access_token": access_token,
             "refresh_token": refresh_token,
             "expires_at": expires_at,
-            "token_file": token_file
+            "token_file": token_file,
         }
 
     except Exception as e:
         print(f"❌ Error during OAuth flow: {e}")
         return None
+
 
 def refresh_existing_token():
     """Refresh an existing token if possible."""
@@ -147,10 +149,10 @@ def refresh_existing_token():
         return None
 
     try:
-        with open(token_file, 'r') as f:
+        with open(token_file, "r") as f:
             token_info = json.load(f)
 
-        refresh_token = token_info.get('refresh_token')
+        refresh_token = token_info.get("refresh_token")
         if not refresh_token:
             print("❌ No refresh token available")
             return None
@@ -164,16 +166,20 @@ def refresh_existing_token():
             print("✅ Token refreshed successfully!")
 
             # Update token file
-            token_info.update({
-                "access_token": credentials.token,
-                "expires_at": credentials.expiry.isoformat() if credentials.expiry else None,
-                "refreshed_at": datetime.utcnow().isoformat()
-            })
+            token_info.update(
+                {
+                    "access_token": credentials.token,
+                    "expires_at": credentials.expiry.isoformat()
+                    if credentials.expiry
+                    else None,
+                    "refreshed_at": datetime.utcnow().isoformat(),
+                }
+            )
 
-            with open(token_file, 'w') as f:
+            with open(token_file, "w") as f:
                 json.dump(token_info, f, indent=2)
 
-            print(f"\n🔑 New Access Token:")
+            print("\n🔑 New Access Token:")
             print(f"   {credentials.token}")
 
             return credentials.token
@@ -185,12 +191,14 @@ def refresh_existing_token():
         print(f"❌ Error refreshing token: {e}")
         return None
 
+
 def main():
     """Main function."""
     if len(sys.argv) > 1 and sys.argv[1] == "refresh":
         refresh_existing_token()
     else:
         get_production_token()
+
 
 if __name__ == "__main__":
     main()

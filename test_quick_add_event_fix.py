@@ -12,6 +12,7 @@ import sys
 import random
 from datetime import datetime
 
+
 class QuickAddEventTester:
     def __init__(self):
         """Initialize tester with OAuth token from environment."""
@@ -23,7 +24,7 @@ class QuickAddEventTester:
         # Test both local and production endpoints
         self.test_endpoints = [
             "http://localhost:5000",  # Local development
-            "https://mcp.dipmedia.ai"  # Production
+            "https://mcp.dipmedia.ai",  # Production
         ]
 
     async def test_quick_add_event_fix(self, server_url):
@@ -42,16 +43,16 @@ class QuickAddEventTester:
                 "arguments": {
                     "calendar_id": "primary",
                     "text": f"Test event fix {datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "oauth_token": self.oauth_token
-                }
-            }
+                    "oauth_token": self.oauth_token,
+                },
+            },
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.oauth_token}"
+                    "Authorization": f"Bearer {self.oauth_token}",
                 }
 
                 print(f"📤 Sending MCP request to {mcp_url}")
@@ -61,9 +62,8 @@ class QuickAddEventTester:
                     mcp_url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
-
                     print(f"📥 Response status: {response.status}")
 
                     if response.status != 200:
@@ -97,10 +97,14 @@ class QuickAddEventTester:
                                 if parsed_result.get("success"):
                                     print(f"✅ SUCCESS: {parsed_result.get('message')}")
                                     if parsed_result.get("event_id"):
-                                        print(f"📅 Event ID: {parsed_result['event_id']}")
+                                        print(
+                                            f"📅 Event ID: {parsed_result['event_id']}"
+                                        )
                                     return True
                                 else:
-                                    print(f"⚠️  Function failed: {parsed_result.get('error')}")
+                                    print(
+                                        f"⚠️  Function failed: {parsed_result.get('error')}"
+                                    )
                                     return False
 
                             except json.JSONDecodeError as e:
@@ -151,11 +155,13 @@ class QuickAddEventTester:
             print("\n💥 All endpoints failed - fix may need more work")
             return False
 
+
 async def main():
     """Main test function."""
     tester = QuickAddEventTester()
     success = await tester.run_tests()
     sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

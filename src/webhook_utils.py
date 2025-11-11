@@ -9,12 +9,13 @@ import requests
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
 class WebhookValidator:
     """Handles webhook signature validation and security."""
 
     def __init__(self, secret_key: Optional[str] = None):
         """Initialize webhook validator with optional secret key."""
-        self.secret_key = secret_key or os.getenv('WEBHOOK_SECRET_KEY')
+        self.secret_key = secret_key or os.getenv("WEBHOOK_SECRET_KEY")
 
     def validate_google_webhook(self, headers: Dict[str, str], body: str) -> bool:
         """
@@ -22,8 +23,8 @@ class WebhookValidator:
         Google doesn't use HMAC but we can validate channel tokens.
         """
         try:
-            channel_token = headers.get('X-Goog-Channel-Token')
-            channel_id = headers.get('X-Goog-Channel-ID')
+            channel_token = headers.get("X-Goog-Channel-Token")
+            channel_id = headers.get("X-Goog-Channel-ID")
 
             # Basic validation - ensure required headers are present
             if not channel_id:
@@ -49,10 +50,9 @@ class WebhookValidator:
         if not self.secret_key:
             return ""
         return hmac.new(
-            self.secret_key.encode(),
-            channel_id.encode(),
-            hashlib.sha256
+            self.secret_key.encode(), channel_id.encode(), hashlib.sha256
         ).hexdigest()
+
 
 class WebhookProcessor:
     """Processes webhook notifications and handles business logic."""
@@ -66,7 +66,9 @@ class WebhookProcessor:
         self.registered_handlers[event_type] = handler_func
         logger.info(f"Registered handler for event type: {event_type}")
 
-    def process_google_calendar_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
+    def process_google_calendar_webhook(
+        self, webhook_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Process Google Calendar webhook notifications.
 
@@ -77,18 +79,20 @@ class WebhookProcessor:
             Processing result dictionary
         """
         try:
-            resource_state = webhook_data.get('resource_state', '').lower()
-            channel_id = webhook_data.get('channel_id')
-            resource_uri = webhook_data.get('resource_uri')
+            resource_state = webhook_data.get("resource_state", "").lower()
+            channel_id = webhook_data.get("channel_id")
+            resource_uri = webhook_data.get("resource_uri")
 
-            logger.info(f"Processing webhook: state={resource_state}, channel={channel_id}")
+            logger.info(
+                f"Processing webhook: state={resource_state}, channel={channel_id}"
+            )
 
             # Determine event type based on resource state
-            if resource_state == 'sync':
+            if resource_state == "sync":
                 return self._handle_sync_event(webhook_data)
-            elif resource_state == 'exists':
+            elif resource_state == "exists":
                 return self._handle_event_change(webhook_data)
-            elif resource_state == 'not_exists':
+            elif resource_state == "not_exists":
                 return self._handle_event_deletion(webhook_data)
             else:
                 logger.warning(f"Unknown resource state: {resource_state}")
@@ -103,8 +107,8 @@ class WebhookProcessor:
         logger.info("Handling sync event - initial webhook setup")
 
         # Call registered handler if available
-        if 'sync' in self.registered_handlers:
-            return self.registered_handlers['sync'](webhook_data)
+        if "sync" in self.registered_handlers:
+            return self.registered_handlers["sync"](webhook_data)
 
         return {"status": "sync_processed", "message": "Initial sync completed"}
 
@@ -115,14 +119,14 @@ class WebhookProcessor:
         # Extract useful information
         result = {
             "status": "event_changed",
-            "channel_id": webhook_data.get('channel_id'),
-            "resource_uri": webhook_data.get('resource_uri'),
-            "timestamp": datetime.utcnow().isoformat()
+            "channel_id": webhook_data.get("channel_id"),
+            "resource_uri": webhook_data.get("resource_uri"),
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Call registered handler if available
-        if 'event_change' in self.registered_handlers:
-            handler_result = self.registered_handlers['event_change'](webhook_data)
+        if "event_change" in self.registered_handlers:
+            handler_result = self.registered_handlers["event_change"](webhook_data)
             result.update(handler_result)
 
         return result
@@ -133,17 +137,18 @@ class WebhookProcessor:
 
         result = {
             "status": "event_deleted",
-            "channel_id": webhook_data.get('channel_id'),
-            "resource_uri": webhook_data.get('resource_uri'),
-            "timestamp": datetime.utcnow().isoformat()
+            "channel_id": webhook_data.get("channel_id"),
+            "resource_uri": webhook_data.get("resource_uri"),
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Call registered handler if available
-        if 'event_deletion' in self.registered_handlers:
-            handler_result = self.registered_handlers['event_deletion'](webhook_data)
+        if "event_deletion" in self.registered_handlers:
+            handler_result = self.registered_handlers["event_deletion"](webhook_data)
             result.update(handler_result)
 
         return result
+
 
 class WebhookSubscriptionManager:
     """Manages webhook subscriptions and their lifecycle."""
@@ -156,8 +161,8 @@ class WebhookSubscriptionManager:
         """Store webhook subscription information."""
         self.active_subscriptions[channel_id] = {
             **subscription_data,
-            'created_at': datetime.utcnow().isoformat(),
-            'status': 'active'
+            "created_at": datetime.utcnow().isoformat(),
+            "status": "active",
         }
         logger.info(f"Stored subscription for channel: {channel_id}")
 
@@ -186,7 +191,7 @@ class WebhookSubscriptionManager:
 
         for channel_id, subscription in self.active_subscriptions.items():
             # Check if subscription has expired (implement expiration logic)
-            expiration = subscription.get('expiration')
+            expiration = subscription.get("expiration")
             if expiration:
                 # Convert expiration to datetime and compare
                 # Implementation depends on expiration format
@@ -196,6 +201,7 @@ class WebhookSubscriptionManager:
             self.remove_subscription(channel_id)
 
         logger.info(f"Cleaned up {len(expired_channels)} expired subscriptions")
+
 
 class OpenAIWebhookForwarder:
     """Forwards webhook notifications to OpenAI Platform."""
@@ -207,12 +213,16 @@ class OpenAIWebhookForwarder:
         self.session = requests.Session()
 
         if api_key:
-            self.session.headers.update({
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            })
+            self.session.headers.update(
+                {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                }
+            )
 
-    def forward_webhook(self, webhook_data: Dict[str, Any], retry_count: int = 3) -> Dict[str, Any]:
+    def forward_webhook(
+        self, webhook_data: Dict[str, Any], retry_count: int = 3
+    ) -> Dict[str, Any]:
         """
         Forward webhook data to OpenAI Platform with retry logic.
 
@@ -229,30 +239,34 @@ class OpenAIWebhookForwarder:
                 openai_payload = self._prepare_openai_payload(webhook_data)
 
                 response = self.session.post(
-                    self.openai_endpoint,
-                    json=openai_payload,
-                    timeout=30
+                    self.openai_endpoint, json=openai_payload, timeout=30
                 )
 
                 response.raise_for_status()
 
-                logger.info(f"Successfully forwarded webhook to OpenAI (attempt {attempt + 1})")
+                logger.info(
+                    f"Successfully forwarded webhook to OpenAI (attempt {attempt + 1})"
+                )
 
                 return {
                     "status": "success",
                     "openai_response_status": response.status_code,
-                    "attempt": attempt + 1
+                    "attempt": attempt + 1,
                 }
 
             except requests.exceptions.RequestException as e:
-                logger.warning(f"Attempt {attempt + 1} failed to forward webhook to OpenAI: {e}")
+                logger.warning(
+                    f"Attempt {attempt + 1} failed to forward webhook to OpenAI: {e}"
+                )
 
                 if attempt == retry_count - 1:
-                    logger.error(f"Failed to forward webhook to OpenAI after {retry_count} attempts")
+                    logger.error(
+                        f"Failed to forward webhook to OpenAI after {retry_count} attempts"
+                    )
                     return {
                         "status": "failed",
                         "error": str(e),
-                        "attempts": retry_count
+                        "attempts": retry_count,
                     }
 
         return {"status": "failed", "error": "Maximum retry attempts exceeded"}
@@ -263,13 +277,15 @@ class OpenAIWebhookForwarder:
             "type": "calendar_webhook",
             "timestamp": datetime.utcnow().isoformat(),
             "data": webhook_data,
-            "source": "google_calendar_mcp"
+            "source": "google_calendar_mcp",
         }
+
 
 # Global instances for use in FastAPI endpoints
 webhook_validator = WebhookValidator()
 webhook_processor = WebhookProcessor()
 subscription_manager = WebhookSubscriptionManager()
+
 
 def setup_default_handlers():
     """Setup default webhook event handlers."""
@@ -286,8 +302,9 @@ def setup_default_handlers():
         # Add custom processing logic here
         return {"processed": True, "handler": "default_event_deletion"}
 
-    webhook_processor.register_handler('event_change', default_event_change_handler)
-    webhook_processor.register_handler('event_deletion', default_event_deletion_handler)
+    webhook_processor.register_handler("event_change", default_event_change_handler)
+    webhook_processor.register_handler("event_deletion", default_event_deletion_handler)
+
 
 # Setup default handlers on module import
 setup_default_handlers()

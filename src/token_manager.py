@@ -13,6 +13,7 @@ from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
+
 class TokenManager:
     """Manages OAuth tokens for OpenAI Platform integration with automatic refresh."""
 
@@ -28,7 +29,7 @@ class TokenManager:
             return None
 
         try:
-            with open(self.token_file, 'r') as f:
+            with open(self.token_file, "r") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load token file: {e}")
@@ -37,7 +38,7 @@ class TokenManager:
     def save_token_info(self, token_info: dict) -> bool:
         """Save token information to file."""
         try:
-            with open(self.token_file, 'w') as f:
+            with open(self.token_file, "w") as f:
                 json.dump(token_info, f, indent=2)
             return True
         except Exception as e:
@@ -51,8 +52,8 @@ class TokenManager:
         if not token_info:
             logger.warning("No token info available for refresh")
             # Use environment variables to create complete credentials even without stored token info
-            client_id = os.getenv('GOOGLE_CLIENT_ID')
-            client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+            client_id = os.getenv("GOOGLE_CLIENT_ID")
+            client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
             if client_id and client_secret:
                 logger.info("Creating credentials using environment variables")
@@ -62,7 +63,7 @@ class TokenManager:
                     token_uri="https://oauth2.googleapis.com/token",
                     client_id=client_id,
                     client_secret=client_secret,
-                    scopes=['https://www.googleapis.com/auth/calendar']
+                    scopes=["https://www.googleapis.com/auth/calendar"],
                 )
             else:
                 logger.error("No token info and missing OAuth environment variables")
@@ -73,18 +74,20 @@ class TokenManager:
             # Create credentials with refresh capability
             credentials = Credentials(
                 token=access_token,
-                refresh_token=token_info.get('refresh_token'),
+                refresh_token=token_info.get("refresh_token"),
                 token_uri="https://oauth2.googleapis.com/token",
-                client_id=token_info.get('client_id'),
-                client_secret=token_info.get('client_secret'),
-                scopes=['https://www.googleapis.com/auth/calendar']
+                client_id=token_info.get("client_id"),
+                client_secret=token_info.get("client_secret"),
+                scopes=["https://www.googleapis.com/auth/calendar"],
             )
 
             # Set expiry if available
-            expires_at_str = token_info.get('expires_at')
+            expires_at_str = token_info.get("expires_at")
             if expires_at_str:
                 try:
-                    expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                    expires_at = datetime.fromisoformat(
+                        expires_at_str.replace("Z", "+00:00")
+                    )
                     credentials.expiry = expires_at
                 except Exception as e:
                     logger.warning(f"Could not parse expiry time: {e}")
@@ -99,9 +102,11 @@ class TokenManager:
         """Get valid credentials, refreshing if necessary."""
 
         # Check if we can reuse cached credentials
-        if (self._cached_credentials and
-            self._cached_credentials.valid and
-            self._cached_credentials.token == access_token):
+        if (
+            self._cached_credentials
+            and self._cached_credentials.valid
+            and self._cached_credentials.token == access_token
+        ):
             return self._cached_credentials
 
         # Create credentials from the provided token
@@ -152,11 +157,15 @@ class TokenManager:
             return False
 
         # Update with new token information
-        token_info.update({
-            "access_token": credentials.token,
-            "expires_at": credentials.expiry.isoformat() if credentials.expiry else None,
-            "refreshed_at": datetime.utcnow().isoformat()
-        })
+        token_info.update(
+            {
+                "access_token": credentials.token,
+                "expires_at": credentials.expiry.isoformat()
+                if credentials.expiry
+                else None,
+                "refreshed_at": datetime.utcnow().isoformat(),
+            }
+        )
 
         return self.save_token_info(token_info)
 
@@ -165,38 +174,41 @@ class TokenManager:
         token_info = self.load_token_info()
 
         if not token_info:
-            return {
-                "status": "no_token_file",
-                "message": "No token file found"
-            }
+            return {"status": "no_token_file", "message": "No token file found"}
 
-        access_token = token_info.get('access_token')
-        expires_at_str = token_info.get('expires_at')
-        refresh_token = token_info.get('refresh_token')
+        access_token = token_info.get("access_token")
+        expires_at_str = token_info.get("expires_at")
+        refresh_token = token_info.get("refresh_token")
 
         status = {
             "has_access_token": bool(access_token),
             "has_refresh_token": bool(refresh_token),
-            "token_file": self.token_file
+            "token_file": self.token_file,
         }
 
         if expires_at_str:
             try:
-                expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                expires_at = datetime.fromisoformat(
+                    expires_at_str.replace("Z", "+00:00")
+                )
                 now = datetime.utcnow().replace(tzinfo=expires_at.tzinfo)
 
-                status.update({
-                    "expires_at": expires_at.isoformat(),
-                    "expires_in_seconds": (expires_at - now).total_seconds(),
-                    "is_expired": expires_at <= now
-                })
+                status.update(
+                    {
+                        "expires_at": expires_at.isoformat(),
+                        "expires_in_seconds": (expires_at - now).total_seconds(),
+                        "is_expired": expires_at <= now,
+                    }
+                )
             except Exception as e:
                 status["expiry_parse_error"] = str(e)
 
         return status
 
+
 # Global token manager instance
 token_manager = TokenManager()
+
 
 def get_production_credentials(access_token: str) -> Optional[Credentials]:
     """Get valid credentials for production use, with automatic refresh."""

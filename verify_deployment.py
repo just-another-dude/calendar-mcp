@@ -4,10 +4,9 @@ Deployment verification script for Google Calendar MCP server.
 This script checks if all necessary files and configurations are in place.
 """
 
-import os
-import json
 import sys
 from pathlib import Path
+
 
 class DeploymentVerifier:
     def __init__(self):
@@ -32,7 +31,7 @@ class DeploymentVerifier:
             "src/mcp_bridge.py",
             "src/webhook_utils.py",
             "DEPLOYMENT_GUIDE.md",
-            "RAILWAY_DEPLOYMENT_CHECKLIST.md"
+            "RAILWAY_DEPLOYMENT_CHECKLIST.md",
         ]
 
         all_found = True
@@ -62,7 +61,7 @@ class DeploymentVerifier:
             "requests",
             "python-dotenv",
             "cryptography",
-            "mcp"
+            "mcp",
         ]
 
         try:
@@ -71,7 +70,7 @@ class DeploymentVerifier:
                 self.errors.append("requirements.txt not found")
                 return False
 
-            with open(requirements_file, 'r') as f:
+            with open(requirements_file, "r") as f:
                 requirements_content = f.read().lower()
 
             missing_packages = []
@@ -81,7 +80,9 @@ class DeploymentVerifier:
 
             if missing_packages:
                 print(f"   ❌ Missing packages: {', '.join(missing_packages)}")
-                self.errors.append(f"Missing required packages in requirements.txt: {missing_packages}")
+                self.errors.append(
+                    f"Missing required packages in requirements.txt: {missing_packages}"
+                )
                 return False
             else:
                 print("   ✅ All required packages present")
@@ -107,7 +108,7 @@ class DeploymentVerifier:
         procfile = self.project_root / "Procfile"
         if procfile.exists():
             try:
-                with open(procfile, 'r') as f:
+                with open(procfile, "r") as f:
                     content = f.read().strip()
                 if "python run_server.py" in content:
                     print("   ✅ Procfile configured correctly")
@@ -129,13 +130,13 @@ class DeploymentVerifier:
             "GOOGLE_CLIENT_ID",
             "GOOGLE_CLIENT_SECRET",
             "CALENDAR_SCOPES",
-            "TOKEN_FILE_PATH"
+            "TOKEN_FILE_PATH",
         ]
 
         example_env = self.project_root / "example.env"
         if example_env.exists():
             try:
-                with open(example_env, 'r') as f:
+                with open(example_env, "r") as f:
                     env_content = f.read()
 
                 missing_vars = []
@@ -144,14 +145,18 @@ class DeploymentVerifier:
                         missing_vars.append(var)
 
                 if missing_vars:
-                    self.warnings.append(f"Missing environment variables in example.env: {missing_vars}")
+                    self.warnings.append(
+                        f"Missing environment variables in example.env: {missing_vars}"
+                    )
                 else:
                     print("   ✅ All required environment variables documented")
 
             except Exception as e:
                 self.warnings.append(f"Could not read example.env: {e}")
         else:
-            self.warnings.append("example.env not found - consider creating one for documentation")
+            self.warnings.append(
+                "example.env not found - consider creating one for documentation"
+            )
 
         return True
 
@@ -165,7 +170,7 @@ class DeploymentVerifier:
             return False
 
         try:
-            with open(server_file, 'r') as f:
+            with open(server_file, "r") as f:
                 server_content = f.read()
 
             # Check for MCP endpoints
@@ -174,7 +179,7 @@ class DeploymentVerifier:
                 "mcp_http_transport",
                 "handle_mcp_initialize",
                 "handle_mcp_tools_list",
-                "handle_mcp_tool_call"
+                "handle_mcp_tool_call",
             ]
 
             missing_endpoints = []
@@ -187,13 +192,19 @@ class DeploymentVerifier:
                 return False
 
             # Check for voice-optimized tools
-            voice_tools = ["voice_book_appointment", "voice_check_availability", "voice_get_upcoming"]
+            voice_tools = [
+                "voice_book_appointment",
+                "voice_check_availability",
+                "voice_get_upcoming",
+            ]
             found_voice_tools = sum(1 for tool in voice_tools if tool in server_content)
 
             if found_voice_tools >= 2:
                 print("   ✅ MCP endpoints and voice tools implemented")
             else:
-                self.warnings.append("Voice-optimized tools may not be fully implemented")
+                self.warnings.append(
+                    "Voice-optimized tools may not be fully implemented"
+                )
 
             return True
 
@@ -208,7 +219,7 @@ class DeploymentVerifier:
         gitignore_file = self.project_root / ".gitignore"
         if gitignore_file.exists():
             try:
-                with open(gitignore_file, 'r') as f:
+                with open(gitignore_file, "r") as f:
                     gitignore_content = f.read()
 
                 sensitive_patterns = [".env", "*.json", "__pycache__", "*.log"]
@@ -219,14 +230,18 @@ class DeploymentVerifier:
                         missing_patterns.append(pattern)
 
                 if missing_patterns:
-                    self.warnings.append(f"Consider adding to .gitignore: {missing_patterns}")
+                    self.warnings.append(
+                        f"Consider adding to .gitignore: {missing_patterns}"
+                    )
                 else:
                     print("   ✅ .gitignore properly configured")
 
             except Exception as e:
                 self.warnings.append(f"Could not read .gitignore: {e}")
         else:
-            self.warnings.append(".gitignore not found - create one to exclude sensitive files")
+            self.warnings.append(
+                ".gitignore not found - create one to exclude sensitive files"
+            )
 
         return True
 
@@ -237,7 +252,7 @@ class DeploymentVerifier:
         test_scripts = [
             "test_mcp_integration.py",
             "test_openai_integration.py",
-            "verify_deployment.py"
+            "verify_deployment.py",
         ]
 
         found_scripts = 0
@@ -252,7 +267,9 @@ class DeploymentVerifier:
         if found_scripts >= 2:
             print("   ✅ Testing tools available")
         else:
-            self.warnings.append("Consider creating test scripts for easier deployment verification")
+            self.warnings.append(
+                "Consider creating test scripts for easier deployment verification"
+            )
 
         return True
 
@@ -268,7 +285,7 @@ class DeploymentVerifier:
             ("Environment Template", self.check_environment_template),
             ("MCP Endpoints", self.check_mcp_endpoints),
             ("Git Configuration", self.check_gitignore),
-            ("Test Scripts", self.check_test_scripts)
+            ("Test Scripts", self.check_test_scripts),
         ]
 
         results = {}
@@ -319,6 +336,7 @@ class DeploymentVerifier:
             print("Fix the errors above before deploying to Railway.")
             return False
 
+
 def main():
     """Main function to run deployment verification."""
     print("Google Calendar MCP Server - Deployment Verification")
@@ -328,6 +346,7 @@ def main():
     success = verifier.run_verification()
 
     sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     main()

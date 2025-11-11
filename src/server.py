@@ -2090,6 +2090,18 @@ async def handle_mcp_tool_call(request_id, params, creds):
             content = json.dumps({"error": "Operation failed"})
         elif isinstance(result, (dict, list)):
             content = json.dumps(result, indent=2)
+        elif hasattr(result, "model_dump"):
+            # Handle Pydantic v2 BaseModel instances
+            try:
+                content = json.dumps(result.model_dump(), indent=2, default=str)
+            except Exception:
+                content = json.dumps(result.model_dump(), indent=2)
+        elif hasattr(result, "dict"):
+            # Handle Pydantic v1 BaseModel instances
+            try:
+                content = json.dumps(result.dict(), indent=2, default=str)
+            except Exception:
+                content = json.dumps(result.dict(), indent=2)
         else:
             content = str(result)
 

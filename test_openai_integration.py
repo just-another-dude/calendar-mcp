@@ -5,8 +5,6 @@ This script tests the complete OpenAI Responses API integration.
 """
 
 import sys
-import json
-import os
 from datetime import datetime, timedelta
 
 try:
@@ -14,6 +12,7 @@ try:
 except ImportError:
     print("❌ OpenAI package not installed. Install with: pip install openai")
     sys.exit(1)
+
 
 class OpenAIMCPTester:
     def __init__(self, openai_api_key, mcp_server_url, google_oauth_token):
@@ -30,7 +29,7 @@ class OpenAIMCPTester:
             "server_description": "Google Calendar integration for appointment booking and management",
             "server_url": self.mcp_server_url,
             "authorization": self.google_oauth_token,
-            "require_approval": "never"
+            "require_approval": "never",
         }
 
         if allowed_tools:
@@ -45,7 +44,7 @@ class OpenAIMCPTester:
             response = self.client.responses.create(
                 model="gpt-5",
                 tools=[self.get_mcp_tool_config(["list_calendars"])],
-                input="List my calendars"
+                input="List my calendars",
             )
 
             if response.output_text:
@@ -71,7 +70,7 @@ class OpenAIMCPTester:
             response = self.client.responses.create(
                 model="gpt-5",
                 tools=[self.get_mcp_tool_config(["voice_book_appointment"])],
-                input=f"Schedule a test meeting {day_name} at 3 PM for 1 hour"
+                input=f"Schedule a test meeting {day_name} at 3 PM for 1 hour",
             )
 
             if response.output_text:
@@ -79,8 +78,10 @@ class OpenAIMCPTester:
                 print(f"   Response: {response.output_text}")
 
                 # Check if response mentions successful booking
-                if any(keyword in response.output_text.lower() for keyword in
-                       ["scheduled", "booked", "added", "created"]):
+                if any(
+                    keyword in response.output_text.lower()
+                    for keyword in ["scheduled", "booked", "added", "created"]
+                ):
                     print("   ✅ Booking appears successful")
                     return True
                 else:
@@ -101,7 +102,7 @@ class OpenAIMCPTester:
             response = self.client.responses.create(
                 model="gpt-5",
                 tools=[self.get_mcp_tool_config(["voice_check_availability"])],
-                input="Am I free tomorrow afternoon?"
+                input="Am I free tomorrow afternoon?",
             )
 
             if response.output_text:
@@ -109,8 +110,10 @@ class OpenAIMCPTester:
                 print(f"   Response: {response.output_text}")
 
                 # Check if response mentions availability
-                if any(keyword in response.output_text.lower() for keyword in
-                       ["free", "available", "busy", "appointment"]):
+                if any(
+                    keyword in response.output_text.lower()
+                    for keyword in ["free", "available", "busy", "appointment"]
+                ):
                     print("   ✅ Availability information provided")
                     return True
                 else:
@@ -131,7 +134,7 @@ class OpenAIMCPTester:
             response = self.client.responses.create(
                 model="gpt-5",
                 tools=[self.get_mcp_tool_config(["voice_get_upcoming"])],
-                input="What meetings do I have coming up this week?"
+                input="What meetings do I have coming up this week?",
             )
 
             if response.output_text:
@@ -139,8 +142,16 @@ class OpenAIMCPTester:
                 print(f"   Response: {response.output_text}")
 
                 # Check if response mentions events or schedule
-                if any(keyword in response.output_text.lower() for keyword in
-                       ["meeting", "appointment", "event", "schedule", "calendar"]):
+                if any(
+                    keyword in response.output_text.lower()
+                    for keyword in [
+                        "meeting",
+                        "appointment",
+                        "event",
+                        "schedule",
+                        "calendar",
+                    ]
+                ):
                     print("   ✅ Calendar information provided")
                     return True
                 else:
@@ -160,12 +171,16 @@ class OpenAIMCPTester:
         try:
             response = self.client.responses.create(
                 model="gpt-5",
-                tools=[self.get_mcp_tool_config([
-                    "voice_check_availability",
-                    "voice_book_appointment",
-                    "voice_get_upcoming"
-                ])],
-                input="Check if I'm free tomorrow at 2 PM, and if so, schedule a doctor appointment then"
+                tools=[
+                    self.get_mcp_tool_config(
+                        [
+                            "voice_check_availability",
+                            "voice_book_appointment",
+                            "voice_get_upcoming",
+                        ]
+                    )
+                ],
+                input="Check if I'm free tomorrow at 2 PM, and if so, schedule a doctor appointment then",
             )
 
             if response.output_text:
@@ -174,8 +189,9 @@ class OpenAIMCPTester:
 
                 # Check if response shows logical flow
                 response_lower = response.output_text.lower()
-                if ("free" in response_lower or "available" in response_lower) and \
-                   ("scheduled" in response_lower or "booked" in response_lower):
+                if ("free" in response_lower or "available" in response_lower) and (
+                    "scheduled" in response_lower or "booked" in response_lower
+                ):
                     print("   ✅ Complex logic executed successfully")
                     return True
                 else:
@@ -196,7 +212,7 @@ class OpenAIMCPTester:
             response = self.client.responses.create(
                 model="gpt-5",
                 tools=[self.get_mcp_tool_config(["voice_book_appointment"])],
-                input="Schedule a meeting for yesterday"  # Invalid past date
+                input="Schedule a meeting for yesterday",  # Invalid past date
             )
 
             if response.output_text:
@@ -205,8 +221,10 @@ class OpenAIMCPTester:
 
                 # Check if response handles the error gracefully
                 response_lower = response.output_text.lower()
-                if any(keyword in response_lower for keyword in
-                       ["cannot", "unable", "error", "invalid", "past"]):
+                if any(
+                    keyword in response_lower
+                    for keyword in ["cannot", "unable", "error", "invalid", "past"]
+                ):
                     print("   ✅ Error handled gracefully")
                     return True
                 else:
@@ -231,7 +249,7 @@ class OpenAIMCPTester:
             ("Availability Check", self.test_availability_check),
             ("Upcoming Events", self.test_upcoming_events),
             ("Complex Interaction", self.test_complex_interaction),
-            ("Error Handling", self.test_error_handling)
+            ("Error Handling", self.test_error_handling),
         ]
 
         results = {}
@@ -265,11 +283,16 @@ class OpenAIMCPTester:
 
         return all_passed
 
+
 def main():
     """Main function to run OpenAI integration tests."""
     if len(sys.argv) != 4:
-        print("Usage: python test_openai_integration.py <openai_api_key> <mcp_server_url> <google_oauth_token>")
-        print("Example: python test_openai_integration.py sk-... https://your-app.railway.app/mcp ya29.a0...")
+        print(
+            "Usage: python test_openai_integration.py <openai_api_key> <mcp_server_url> <google_oauth_token>"
+        )
+        print(
+            "Example: python test_openai_integration.py sk-... https://your-app.railway.app/mcp ya29.a0..."
+        )
         sys.exit(1)
 
     openai_api_key = sys.argv[1]
@@ -277,11 +300,11 @@ def main():
     google_oauth_token = sys.argv[3]
 
     # Validate inputs
-    if not openai_api_key.startswith('sk-'):
+    if not openai_api_key.startswith("sk-"):
         print("❌ OpenAI API key should start with 'sk-'")
         sys.exit(1)
 
-    if not mcp_server_url.startswith(('http://', 'https://')):
+    if not mcp_server_url.startswith(("http://", "https://")):
         print("❌ MCP server URL must start with http:// or https://")
         sys.exit(1)
 
@@ -314,6 +337,7 @@ def main():
         print("- Verify Google OAuth token is not expired")
         print("- Ensure OpenAI API key has access to Responses API")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

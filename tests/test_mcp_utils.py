@@ -7,11 +7,11 @@ to proper Pydantic models for calendar_actions.
 
 import pytest
 import datetime
-from pydantic import ValidationError
 
 # Add the parent directory to the path to ensure imports work
 import sys
 import os
+
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
@@ -20,7 +20,7 @@ from src.mcp_utils import (
     parse_datetime_string,
     mcp_params_to_event_create_request,
     mcp_params_to_event_update_request,
-    validate_mcp_create_params
+    validate_mcp_create_params,
 )
 from src.models import EventCreateRequest, EventUpdateRequest, EventDateTime
 
@@ -77,7 +77,7 @@ class TestMcpParamsToEventCreateRequest:
         arguments = {
             "summary": "Team Meeting",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         result = mcp_params_to_event_create_request(arguments)
@@ -101,7 +101,7 @@ class TestMcpParamsToEventCreateRequest:
             "end_time": "2025-11-02T15:00:00",
             "description": "Weekly team sync",
             "location": "Conference Room A",
-            "attendee_emails": ["alice@example.com", "bob@example.com"]
+            "attendee_emails": ["alice@example.com", "bob@example.com"],
         }
 
         result = mcp_params_to_event_create_request(arguments)
@@ -115,45 +115,42 @@ class TestMcpParamsToEventCreateRequest:
     def test_hebrew_summary(self):
         """Test creating EventCreateRequest with Hebrew title."""
         arguments = {
-            "summary": "פגישה עם ד\"ר קליין",
+            "summary": 'פגישה עם ד"ר קליין',
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         result = mcp_params_to_event_create_request(arguments)
 
         assert isinstance(result, EventCreateRequest)
-        assert result.summary == "פגישה עם ד\"ר קליין"
+        assert result.summary == 'פגישה עם ד"ר קליין'
 
     def test_missing_required_fields(self):
         """Test that missing required fields raise ValueError."""
         # Missing summary
         with pytest.raises(ValueError, match="Missing required fields"):
-            mcp_params_to_event_create_request({
-                "start_time": "2025-11-02T14:00:00",
-                "end_time": "2025-11-02T15:00:00"
-            })
+            mcp_params_to_event_create_request(
+                {"start_time": "2025-11-02T14:00:00", "end_time": "2025-11-02T15:00:00"}
+            )
 
         # Missing start_time
         with pytest.raises(ValueError, match="Missing required fields"):
-            mcp_params_to_event_create_request({
-                "summary": "Meeting",
-                "end_time": "2025-11-02T15:00:00"
-            })
+            mcp_params_to_event_create_request(
+                {"summary": "Meeting", "end_time": "2025-11-02T15:00:00"}
+            )
 
         # Missing end_time
         with pytest.raises(ValueError, match="Missing required fields"):
-            mcp_params_to_event_create_request({
-                "summary": "Meeting",
-                "start_time": "2025-11-02T14:00:00"
-            })
+            mcp_params_to_event_create_request(
+                {"summary": "Meeting", "start_time": "2025-11-02T14:00:00"}
+            )
 
     def test_invalid_datetime_format(self):
         """Test that invalid datetime formats are handled."""
         arguments = {
             "summary": "Meeting",
             "start_time": "invalid-datetime",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         with pytest.raises(ValueError, match="Error creating EventCreateRequest"):
@@ -165,7 +162,7 @@ class TestMcpParamsToEventCreateRequest:
             "summary": "Meeting",
             "start_time": "2025-11-02T14:00:00",
             "end_time": "2025-11-02T15:00:00",
-            "attendee_emails": []
+            "attendee_emails": [],
         }
 
         result = mcp_params_to_event_create_request(arguments)
@@ -192,7 +189,7 @@ class TestMcpParamsToEventUpdateRequest:
         """Test updating only start and end times."""
         arguments = {
             "start_time": "2025-11-02T16:00:00",
-            "end_time": "2025-11-02T17:00:00"
+            "end_time": "2025-11-02T17:00:00",
         }
 
         result = mcp_params_to_event_update_request(arguments)
@@ -211,7 +208,7 @@ class TestMcpParamsToEventUpdateRequest:
             "start_time": "2025-11-02T16:00:00",
             "end_time": "2025-11-02T17:00:00",
             "description": "Updated description",
-            "location": "New location"
+            "location": "New location",
         }
 
         result = mcp_params_to_event_update_request(arguments)
@@ -252,7 +249,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "Meeting",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -262,7 +259,7 @@ class TestValidateMcpCreateParams:
         """Test validation error for missing summary."""
         arguments = {
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -274,7 +271,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -282,10 +279,7 @@ class TestValidateMcpCreateParams:
 
     def test_missing_start_time(self):
         """Test validation error for missing start_time."""
-        arguments = {
-            "summary": "Meeting",
-            "end_time": "2025-11-02T15:00:00"
-        }
+        arguments = {"summary": "Meeting", "end_time": "2025-11-02T15:00:00"}
 
         errors = validate_mcp_create_params(arguments)
         assert "start_time" in errors
@@ -293,10 +287,7 @@ class TestValidateMcpCreateParams:
 
     def test_missing_end_time(self):
         """Test validation error for missing end_time."""
-        arguments = {
-            "summary": "Meeting",
-            "start_time": "2025-11-02T14:00:00"
-        }
+        arguments = {"summary": "Meeting", "start_time": "2025-11-02T14:00:00"}
 
         errors = validate_mcp_create_params(arguments)
         assert "end_time" in errors
@@ -307,7 +298,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "Meeting",
             "start_time": "invalid-datetime",
-            "end_time": "2025-11-02T15:00:00"
+            "end_time": "2025-11-02T15:00:00",
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -319,7 +310,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "Meeting",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "invalid-datetime"
+            "end_time": "invalid-datetime",
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -331,7 +322,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "Meeting",
             "start_time": "2025-11-02T15:00:00",
-            "end_time": "2025-11-02T14:00:00"  # Before start_time
+            "end_time": "2025-11-02T14:00:00",  # Before start_time
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -343,7 +334,7 @@ class TestValidateMcpCreateParams:
         arguments = {
             "summary": "Meeting",
             "start_time": "2025-11-02T14:00:00",
-            "end_time": "2025-11-02T14:00:00"  # Same as start_time
+            "end_time": "2025-11-02T14:00:00",  # Same as start_time
         }
 
         errors = validate_mcp_create_params(arguments)
@@ -354,7 +345,7 @@ class TestValidateMcpCreateParams:
         """Test that multiple validation errors are captured."""
         arguments = {
             "start_time": "invalid-start",
-            "end_time": "invalid-end"
+            "end_time": "invalid-end",
             # Missing summary
         }
 
@@ -375,7 +366,7 @@ class TestMcpUtilsIntegration:
             "summary": "Integration Test Meeting",
             "start_time": "2025-11-02T14:00:00",
             "end_time": "2025-11-02T15:00:00",
-            "description": "Test description"
+            "description": "Test description",
         }
 
         result = mcp_params_to_event_create_request(arguments)
@@ -402,7 +393,7 @@ class TestMcpUtilsIntegration:
         arguments = {
             "summary": "Timezone Test",
             "start_time": "2025-11-02T14:00:00+02:00",
-            "end_time": "2025-11-02T15:00:00+02:00"
+            "end_time": "2025-11-02T15:00:00+02:00",
         }
 
         result = mcp_params_to_event_create_request(arguments)

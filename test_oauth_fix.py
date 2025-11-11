@@ -12,9 +12,10 @@ import random
 from datetime import datetime
 
 # Add current directory to path
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from src.auth import get_credentials
+
 
 class OAuth_Fix_Tester:
     def __init__(self):
@@ -28,9 +29,11 @@ class OAuth_Fix_Tester:
         try:
             # Use the configured OAuth credentials
             credentials = get_credentials()
-            if credentials and hasattr(credentials, 'token'):
-                print(f"✅ OAuth token generated successfully")
-                print(f"📅 Token expires: {getattr(credentials, 'expiry', 'No expiry info')}")
+            if credentials and hasattr(credentials, "token"):
+                print("✅ OAuth token generated successfully")
+                print(
+                    f"📅 Token expires: {getattr(credentials, 'expiry', 'No expiry info')}"
+                )
                 return credentials.token
             else:
                 print("❌ Failed to generate OAuth token")
@@ -55,26 +58,25 @@ class OAuth_Fix_Tester:
                 "arguments": {
                     "calendar_id": "primary",
                     "text": f"OAuth fix test {datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "oauth_token": oauth_token
-                }
-            }
+                    "oauth_token": oauth_token,
+                },
+            },
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {oauth_token}"
+                    "Authorization": f"Bearer {oauth_token}",
                 }
 
-                print(f"📤 Testing quick_add_event function...")
+                print("📤 Testing quick_add_event function...")
                 async with session.post(
                     self.mcp_url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
-
                     print(f"📥 Response status: {response.status}")
 
                     if response.status != 200:
@@ -92,7 +94,9 @@ class OAuth_Fix_Tester:
                             print(f"❌ OLD BUG STILL PRESENT: {error_msg}")
                             return False
                         else:
-                            print(f"ℹ️  API Error (expected with proper credentials): {error_msg}")
+                            print(
+                                f"ℹ️  API Error (expected with proper credentials): {error_msg}"
+                            )
                             return True  # This is expected without proper Google Calendar setup
 
                     # Check for success
@@ -108,7 +112,9 @@ class OAuth_Fix_Tester:
                                 print(f"❌ JSON parsing failed: {e}")
                                 return False
 
-                    print(f"✅ Function name fix working - no more 'create_quick_add_event' error")
+                    print(
+                        "✅ Function name fix working - no more 'create_quick_add_event' error"
+                    )
                     return True
 
         except Exception as e:
@@ -124,12 +130,14 @@ class OAuth_Fix_Tester:
         oauth_token = self.get_proper_oauth_token()
 
         if not oauth_token:
-            print("\n⚠️  Could not generate OAuth token - using existing token for function name test")
+            print(
+                "\n⚠️  Could not generate OAuth token - using existing token for function name test"
+            )
             # Use the existing token for testing function name fix
             oauth_token = os.getenv("GOOGLE_OAUTH_TOKEN", "test_token")
 
         # Step 2: Test MCP server locally
-        print(f"\n📍 Testing local MCP server...")
+        print("\n📍 Testing local MCP server...")
         success = await self.test_mcp_server_locally(oauth_token)
 
         print("\n📊 Test Results")
@@ -143,11 +151,13 @@ class OAuth_Fix_Tester:
 
         return success
 
+
 async def main():
     """Main test function."""
     tester = OAuth_Fix_Tester()
     success = await tester.run_test()
     sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -6,6 +6,7 @@ Simple test to verify the function name fix is working.
 import requests
 import json
 
+
 def test_function_name_fix():
     """Test if the quick_add_event function name fix is working."""
 
@@ -19,9 +20,9 @@ def test_function_name_fix():
             "arguments": {
                 "calendar_id": "primary",
                 "text": "Function name fix test",
-                "oauth_token": "test_token"
-            }
-        }
+                "oauth_token": "test_token",
+            },
+        },
     }
 
     try:
@@ -30,7 +31,7 @@ def test_function_name_fix():
             "http://localhost:8000/mcp",
             json=payload,
             headers={"Content-Type": "application/json"},
-            timeout=10
+            timeout=10,
         )
 
         print(f"📥 Response status: {response.status_code}")
@@ -46,7 +47,9 @@ def test_function_name_fix():
                     print("❌ OLD BUG STILL PRESENT: create_quick_add_event error")
                     return False
                 else:
-                    print(f"✅ FUNCTION NAME FIX WORKING! Error is different: {error_msg}")
+                    print(
+                        f"✅ FUNCTION NAME FIX WORKING! Error is different: {error_msg}"
+                    )
                     return True
             else:
                 print("✅ FUNCTION NAME FIX WORKING! No function name error")
@@ -58,6 +61,7 @@ def test_function_name_fix():
     except Exception as e:
         print(f"❌ Test error: {e}")
         return False
+
 
 if __name__ == "__main__":
     print("🧪 Testing Function Name Fix")

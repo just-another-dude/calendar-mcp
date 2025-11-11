@@ -5,9 +5,9 @@ Run this script with your Railway URL to test all endpoints.
 """
 
 import requests
-import json
 import sys
 from datetime import datetime
+
 
 def test_railway_deployment(base_url: str):
     """Test the Railway deployment endpoints."""
@@ -38,13 +38,13 @@ def test_railway_deployment(base_url: str):
             "jsonrpc": "2.0",
             "method": "initialize",
             "id": "test_init",
-            "params": {}
+            "params": {},
         }
         response = requests.post(
             f"{base_url}/mcp",
             json=mcp_request,
             headers={"Content-Type": "application/json"},
-            timeout=10
+            timeout=10,
         )
         if response.status_code == 200:
             data = response.json()
@@ -64,13 +64,13 @@ def test_railway_deployment(base_url: str):
             "jsonrpc": "2.0",
             "method": "tools/list",
             "id": "test_tools",
-            "params": {}
+            "params": {},
         }
         response = requests.post(
             f"{base_url}/mcp",
             json=mcp_request,
             headers={"Content-Type": "application/json"},
-            timeout=10
+            timeout=10,
         )
         if response.status_code == 200:
             data = response.json()
@@ -89,11 +89,13 @@ def test_railway_deployment(base_url: str):
     try:
         response = requests.get(f"{base_url}/docs", timeout=10)
         if response.status_code == 200:
-            print(f"   ✅ API docs accessible")
+            print("   ✅ API docs accessible")
             results.append(("API Documentation", True, "Docs accessible"))
         else:
             print(f"   ❌ API docs failed: {response.status_code}")
-            results.append(("API Documentation", False, f"Status: {response.status_code}"))
+            results.append(
+                ("API Documentation", False, f"Status: {response.status_code}")
+            )
     except Exception as e:
         print(f"   ❌ API docs error: {e}")
         results.append(("API Documentation", False, str(e)))
@@ -105,7 +107,9 @@ def test_railway_deployment(base_url: str):
         if response.status_code == 200:
             schema = response.json()
             endpoints_count = len(schema.get("paths", {}))
-            print(f"   ✅ OpenAPI schema accessible: {endpoints_count} endpoints defined")
+            print(
+                f"   ✅ OpenAPI schema accessible: {endpoints_count} endpoints defined"
+            )
             results.append(("OpenAPI Schema", True, f"{endpoints_count} endpoints"))
         else:
             print(f"   ❌ OpenAPI schema failed: {response.status_code}")
@@ -139,6 +143,7 @@ def test_railway_deployment(base_url: str):
         print("Check the Railway logs for more details.")
         return False
 
+
 def main():
     """Main function to run deployment tests."""
     if len(sys.argv) != 2:
@@ -146,7 +151,7 @@ def main():
         print("Example: python test_railway_deployment.py https://your-app.railway.app")
         sys.exit(1)
 
-    base_url = sys.argv[1].rstrip('/')
+    base_url = sys.argv[1].rstrip("/")
 
     print("Google Calendar MCP Server - Railway Deployment Test")
     print("=" * 60)
@@ -167,6 +172,7 @@ def main():
         print("2. Verify environment variables are set")
         print("3. Ensure health endpoint returns 200")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
