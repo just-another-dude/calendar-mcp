@@ -1789,11 +1789,41 @@ async def handle_mcp_tool_call(request_id, params, creds):
                 credentials=creds, min_access_role=arguments.get("min_access_role")
             )
         elif tool_name == "find_events":
+            # Support both time_min/time_max (MCP Bridge) and start_date/end_date (voice-agent)
+            # for backward compatibility
+            time_min_str = arguments.get("time_min") or arguments.get("start_date")
+            time_max_str = arguments.get("time_max") or arguments.get("end_date")
+
+            # Log incoming parameters for debugging
+            logger.info(
+                f"find_events called with parameters: time_min/start_date='{time_min_str}', "
+                f"time_max/end_date='{time_max_str}', calendar_id='{arguments.get('calendar_id')}', "
+                f"max_results={arguments.get('max_results', 50)}"
+            )
+
+            # Convert string timestamps to datetime objects if provided
+            time_min = None
+            time_max = None
+
+            if time_min_str:
+                try:
+                    time_min = parser.isoparse(time_min_str)
+                    logger.debug(f"Parsed time_min: {time_min}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse time_min '{time_min_str}': {e}")
+
+            if time_max_str:
+                try:
+                    time_max = parser.isoparse(time_max_str)
+                    logger.debug(f"Parsed time_max: {time_max}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse time_max '{time_max_str}': {e}")
+
             result = calendar_actions.find_events(
                 credentials=creds,
                 calendar_id=arguments["calendar_id"],
-                time_min=arguments.get("time_min"),
-                time_max=arguments.get("time_max"),
+                time_min=time_min,
+                time_max=time_max,
                 query=arguments.get("query"),
                 max_results=arguments.get("max_results", 50),
             )
