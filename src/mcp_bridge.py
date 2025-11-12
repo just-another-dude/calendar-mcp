@@ -162,6 +162,8 @@ def create_mcp_server():
         end_time: str = None,
         description: str = None,
         location: str = None,
+        timezone: str = None,
+        oauth_token: str = None,
     ) -> str:
         """Updates an existing event.
 
@@ -173,6 +175,8 @@ def create_mcp_server():
             end_time: New end time in ISO 8601 format (e.g., 'YYYY-MM-DDTHH:MM:SSZ' or 'YYYY-MM-DDTHH:MM:SS+HH:MM').
             description: New description for the event.
             location: New location for the event.
+            timezone: Target timezone for time conversion.
+            oauth_token: OAuth token for authentication.
         """
         try:
             data = {}
