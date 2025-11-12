@@ -1871,7 +1871,7 @@ async def handle_mcp_tool_call(request_id, params, creds):
                     credentials=creds,
                     calendar_id=arguments["calendar_id"],
                     event_id=arguments["event_id"],
-                    event_data=event_update_data,  # Now a proper EventUpdateRequest object
+                    update_data=event_update_data,  # Now a proper EventUpdateRequest object
                 )
             except ValueError as e:
                 result = {
