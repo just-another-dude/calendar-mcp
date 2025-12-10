@@ -974,47 +974,71 @@ def find_availability(
     time_min_str = time_min.isoformat() + ("Z" if time_min.tzinfo is None else "")
     time_max_str = time_max.isoformat() + ("Z" if time_max.tzinfo is None else "")
 
-    request_body = {
-        "timeMin": time_min_str,
-        "timeMax": time_max_str,
-        "items": [{"id": cal_id} for cal_id in calendar_ids],
-        # Optional: Add groupExpansionMax, calendarExpansionMax if needed
-    }
-
     logger.info(
-        f"Querying free/busy information for calendars: {calendar_ids} between {time_min_str} and {time_max_str}"
+        f"Querying availability for calendars: {calendar_ids} between {time_min_str} and {time_max_str}"
     )
-    logger.debug(f"Free/busy request body: {request_body}")
 
     try:
-        freebusy_result = service.freebusy().query(body=request_body).execute()
-        logger.debug(f"Free/busy raw response: {freebusy_result}")
-
-        # Process the response into a more usable format
+        # Use events().list() instead of freebusy().query() to work with calendar.events scope
+        # This avoids requiring the calendar.freebusy scope
         processed_results: Dict[str, Dict[str, Any]] = {}
-        calendars_data = freebusy_result.get("calendars", {})
 
-        for cal_id, data in calendars_data.items():
-            busy_intervals = []
-            for interval in data.get("busy", []):
-                try:
-                    # Parse RFC3339 strings back to datetime objects
-                    start_dt = parser.isoparse(interval.get("start"))
-                    end_dt = parser.isoparse(interval.get("end"))
-                    busy_intervals.append({"start": start_dt, "end": end_dt})
-                except (TypeError, ValueError) as parse_error:
-                    logger.warning(
-                        f"Could not parse busy interval for {cal_id}: {interval}. Error: {parse_error}"
+        for cal_id in calendar_ids:
+            try:
+                events_result = (
+                    service.events()
+                    .list(
+                        calendarId=cal_id,
+                        timeMin=time_min_str,
+                        timeMax=time_max_str,
+                        singleEvents=True,  # Expand recurring events into instances
+                        fields="items(id,start,end,transparency)",  # Only fetch needed fields
+                        maxResults=250,  # Reasonable limit for availability checking
                     )
-                    # Optionally add this interval with raw strings or skip it
+                    .execute()
+                )
 
-            processed_results[cal_id] = {
-                "busy": busy_intervals,
-                "errors": data.get("errors", []),  # Keep API errors as is
-            }
+                logger.debug(f"Events list response for {cal_id}: {events_result}")
+
+                # Extract busy periods from events
+                busy_intervals = []
+                for event in events_result.get("items", []):
+                    # Skip transparent events (they show as "available" in calendar)
+                    if event.get("transparency") == "transparent":
+                        continue
+
+                    start = event.get("start", {})
+                    end = event.get("end", {})
+
+                    try:
+                        # Handle both dateTime (timed events) and date (all-day events)
+                        start_str = start.get("dateTime") or start.get("date")
+                        end_str = end.get("dateTime") or end.get("date")
+
+                        if start_str and end_str:
+                            start_dt = parser.isoparse(start_str)
+                            end_dt = parser.isoparse(end_str)
+                            busy_intervals.append({"start": start_dt, "end": end_dt})
+                    except (TypeError, ValueError) as parse_error:
+                        logger.warning(
+                            f"Could not parse event times for {cal_id}: {event}. Error: {parse_error}"
+                        )
+
+                processed_results[cal_id] = {"busy": busy_intervals, "errors": []}
+                logger.debug(
+                    f"Found {len(busy_intervals)} busy intervals for calendar {cal_id}"
+                )
+
+            except HttpError as cal_error:
+                # Handle per-calendar errors (e.g., calendar not found)
+                logger.warning(f"Error querying calendar {cal_id}: {cal_error}")
+                processed_results[cal_id] = {
+                    "busy": [],
+                    "errors": [{"domain": "calendar", "reason": str(cal_error)}],
+                }
 
         logger.info(
-            f"Successfully retrieved free/busy information for {len(processed_results)} calendars."
+            f"Successfully retrieved availability for {len(processed_results)} calendars."
         )
         return processed_results
 
