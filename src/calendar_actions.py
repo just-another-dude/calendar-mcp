@@ -145,17 +145,37 @@ def find_events(
 
     logger.info(
         f"Fetching events from calendar '{calendar_id}' with parameters: {list_kwargs}"
-        # f"time_min='{time_min_str}', time_max='{time_max_str}', query='{query}', "
-        # f"max_results={max_results}, single_events={single_events}, order_by='{order_by}', "
-        # f"iCalUID='{iCalUID}', sharedExtendedProperty='{sharedExtendedProperty}', "
-        # f"privateExtendedProperty='{privateExtendedProperty}', showDeleted={showDeleted}, "
-        # f"eventTypes={eventTypes}"
     )
 
     try:
+        # Diagnostic: Log the calendar metadata to verify we're accessing the right calendar
+        try:
+            calendar_metadata = (
+                service.calendars().get(calendarId=calendar_id).execute()
+            )
+            logger.info(
+                f"📅 Calendar verification - ID: {calendar_id}, "
+                f"Summary: '{calendar_metadata.get('summary', 'N/A')}', "
+                f"TimeZone: '{calendar_metadata.get('timeZone', 'N/A')}'"
+            )
+        except Exception as meta_error:
+            logger.warning(
+                f"Could not fetch calendar metadata for '{calendar_id}': {meta_error}"
+            )
+
         events_result = service.events().list(**list_kwargs).execute()
 
-        logger.info(f"Found {len(events_result.get('items', []))} events.")
+        # Enhanced logging with event summaries for debugging
+        events_found = events_result.get("items", [])
+        logger.info(
+            f"🔍 find_events result: Found {len(events_found)} events in calendar '{calendar_id}'"
+        )
+        if events_found:
+            event_summaries = [
+                f"'{e.get('summary', 'No title')}' at {e.get('start', {}).get('dateTime', e.get('start', {}).get('date', 'N/A'))}"
+                for e in events_found[:5]  # Log first 5 events
+            ]
+            logger.info(f"📋 First events: {', '.join(event_summaries)}")
 
         # Parse the result using Pydantic models for validation and structure
         events_response = EventsResponse(**events_result)
@@ -985,6 +1005,20 @@ def find_availability(
 
         for cal_id in calendar_ids:
             try:
+                # Diagnostic: Log the calendar metadata to verify we're accessing the right calendar
+                try:
+                    calendar_metadata = (
+                        service.calendars().get(calendarId=cal_id).execute()
+                    )
+                    logger.info(
+                        f"📅 Availability check - Calendar: '{calendar_metadata.get('summary', 'N/A')}', "
+                        f"TimeZone: '{calendar_metadata.get('timeZone', 'N/A')}'"
+                    )
+                except Exception as meta_error:
+                    logger.warning(
+                        f"Could not fetch calendar metadata for '{cal_id}': {meta_error}"
+                    )
+
                 events_result = (
                     service.events()
                     .list(
@@ -992,13 +1026,25 @@ def find_availability(
                         timeMin=time_min_str,
                         timeMax=time_max_str,
                         singleEvents=True,  # Expand recurring events into instances
-                        fields="items(id,start,end,transparency)",  # Only fetch needed fields
+                        fields="items(id,start,end,transparency,summary)",  # Include summary for debugging
                         maxResults=250,  # Reasonable limit for availability checking
                     )
                     .execute()
                 )
 
-                logger.debug(f"Events list response for {cal_id}: {events_result}")
+                # Enhanced logging for debugging
+                raw_events = events_result.get("items", [])
+                logger.info(
+                    f"🔍 find_availability: Found {len(raw_events)} raw events for calendar '{cal_id}'"
+                )
+                if raw_events:
+                    event_summaries = [
+                        f"'{e.get('summary', 'No title')}' (transparency: {e.get('transparency', 'opaque')})"
+                        for e in raw_events[:5]
+                    ]
+                    logger.info(
+                        f"📋 First events for availability: {', '.join(event_summaries)}"
+                    )
 
                 # Extract busy periods from events
                 busy_intervals = []
